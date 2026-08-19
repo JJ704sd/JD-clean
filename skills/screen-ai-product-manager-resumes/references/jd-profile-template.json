@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "role": "ai-product-manager",
+  "jd_version": "__REPLACE_WITH_APPROVED_JD_VERSION__",
+  "role_variant": "application-ai",
+  "approved_by": [
+    {
+      "reviewer_id": "__REPLACE_RECRUITER_ID__",
+      "role": "recruiter"
+    },
+    {
+      "reviewer_id": "__REPLACE_HIRING_MANAGER_ID__",
+      "role": "hiring_manager"
+    }
+  ],
+  "criteria": [
+    {
+      "criterion_id": "JD-AIPM-001",
+      "requirement_text": "具备应用型 AI 产品从需求到上线的交付经验",
+      "job_relevance": "岗位需要独立推动 AI 功能进入真实业务流程",
+      "category": "must_have",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "有项目上下文、个人责任和上线环节的 E2/E3 证据"
+      ],
+      "insufficient_evidence": [
+        "职位名称、技能列表或孤立 AI 关键词"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "JD-AIPM-002",
+      "requirement_text": "能说明 AI 方案边界和评测方法",
+      "job_relevance": "岗位需要管理生成式 AI 的不确定性和上线质量",
+      "category": "interview_only",
+      "resume_observable": false,
+      "accepted_evidence": [
+        "简历中的评测集、基线、Bad Case 或降级证据可作为面试线索"
+      ],
+      "insufficient_evidence": [
+        "只写准确率、RAG、Agent 或 Prompt"
+      ],
+      "missing_information_action": "interview_verify",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "ai_technical_lead",
+      "approved": false
+    }
+  ]
+}

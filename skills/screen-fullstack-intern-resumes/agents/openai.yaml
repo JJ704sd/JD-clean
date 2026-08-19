@@ -1,0 +1,7 @@
+interface:
+  display_name: "全栈实习生简历初筛"
+  short_description: "依据实习生项目与基础能力证据生成可追溯且需人工复核的初筛建议"
+  default_prompt: "使用 $screen-fullstack-intern-resumes 审查这些全栈开发实习生简历，先输出简洁结构化结论卡，再说明所需人工复核动作。"
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "AI 产品经理简历初筛"
+  short_description: "基于证据筛选 AI 产品经理并执行人工一审与二次校验"
+  default_prompt: "Use $screen-ai-product-manager-resumes to review these AI product manager resumes with evidence and mandatory human verification."
+
+policy:
+  allow_implicit_invocation: true
