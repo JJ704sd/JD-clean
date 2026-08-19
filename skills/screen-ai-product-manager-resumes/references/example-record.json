@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.2",
+  "screening_record_id": "sr-example-001",
+  "candidate_id": "candidate-example-001",
+  "candidate_name": "张三",
+  "role": "ai-product-manager",
+  "screening_basis": "approved_jd",
+  "jd_hard_gates_approved": true,
+  "jd_version": "ai-pm-example-jd-v1",
+  "rubric_version": "ai-pm-rubric-2026-08-18-v3",
+  "screening_status": "non_final",
+  "recommendation": "second_review",
+  "summary": {
+    "conclusion_label": "建议二次复核",
+    "one_line_conclusion": "AI 产品闭环证据较完整，但个人贡献、评测口径和风险治理仍需独立复核。",
+    "top_strengths": [
+      {
+        "criterion_id": "AIPM-PROD-01",
+        "finding": "有一线访谈和历史工单回溯证据"
+      },
+      {
+        "criterion_id": "AIPM-AI-01",
+        "finding": "有混合检索、拒答和能力边界设计"
+      },
+      {
+        "criterion_id": "AIPM-DELIV-01",
+        "finding": "覆盖需求、开发对接、测试和上线运营"
+      }
+    ],
+    "key_gaps": [
+      {
+        "criterion_id": "AIPM-EVAL-01",
+        "finding": "评测指标的样本和口径未说明"
+      },
+      {
+        "criterion_id": "AIPM-RISK-01",
+        "finding": "未提供权限、隐私或人工兜底证据"
+      }
+    ],
+    "human_review_requirement": "人工一审 + 独立二审（原因：U04_CONTRIBUTION_UNCLEAR）",
+    "next_step": "核对个人贡献、评测口径和线上失败处理机制"
+  },
+  "hard_gate_conflicts": [],
+  "evidence": [
+    {
+      "criterion_id": "AIPM-PROD-01",
+      "criterion_name": "产品发现与定义",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "访谈一线用户并回溯历史工单，确定高频问题",
+      "location": "项目经历/项目 A",
+      "rationale": "存在用户研究、问题识别和优先级依据",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "AIPM-AI-01",
+      "criterion_name": "AI 方案理解与边界",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "设计混合检索并约束无依据问题拒答",
+      "location": "项目经历/项目 A",
+      "rationale": "有方案设计和能力边界证据",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "AIPM-EVAL-01",
+      "criterion_name": "评测与迭代",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "建立历史 Query 评测集并复盘 Bad Case",
+      "location": "项目经历/项目 A",
+      "rationale": "存在离线评测和迭代动作，指标口径仍需核实",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "AIPM-DATA-01",
+      "criterion_name": "数据/知识治理",
+      "state": "not_evidenced",
+      "strength": "E1",
+      "excerpt": "搭建企业知识库",
+      "location": "项目经历/项目 A",
+      "rationale": "只提到知识库，未说明更新、权限或质量机制",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "AIPM-DELIV-01",
+      "criterion_name": "端到端交付",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "负责需求、PRD、开发对接、测试和上线运营",
+      "location": "工作经历/职责 3",
+      "rationale": "有端到端环节，但团队贡献边界需二审",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "AIPM-OUT-01",
+      "criterion_name": "用户与业务结果",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "将人工处理耗时从小时级缩短至分钟级",
+      "location": "项目经历/项目 A/成果",
+      "rationale": "存在前后对比，仍需核对样本和观察周期",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "AIPM-RISK-01",
+      "criterion_name": "风险、安全与合规",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未提供隐私、权限、审计或人工兜底证据",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "AIPM-COLLAB-01",
+      "criterion_name": "协作与所有权",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "协调算法、研发和业务团队完成上线",
+      "location": "项目经历/项目 A",
+      "rationale": "有跨团队推动证据，个人决策边界需确认",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    {
+      "code": "U04_CONTRIBUTION_UNCLEAR",
+      "description": "团队结果与候选人个人贡献边界不清",
+      "requires_second_review": true
+    }
+  ],
+  "interview_probes": [
+    "请说明评测集的样本来源、规模、基线和你本人负责的部分。",
+    "耗时缩短指标覆盖哪些用户、观察了多久，如何排除其他因素？",
+    "请举一个线上失败案例，并说明当时的降级、转人工或回滚机制。"
+  ],
+  "sensitive_attributes_used": false,
+  "human_review": {
+    "level_1_required": true,
+    "level_1_reviewer": null,
+    "level_1_decision": null,
+    "level_1_reviewed_at": null,
+    "level_2_required": true,
+    "level_2_mode": "independent_reviewer",
+    "level_2_reason_codes": [
+      "U04_CONTRIBUTION_UNCLEAR"
+    ],
+    "level_2_reviewer": null,
+    "level_2_decision": null,
+    "level_2_reviewed_at": null,
+    "prior_recommendations_hidden_during_recheck": true,
+    "reviewers_agree": null,
+    "disagreement_reason": null,
+    "resolution_owner": null,
+    "resolution": null
+  },
+  "automation_actions": []
+}
