@@ -2,14 +2,14 @@
 
 - `role`: `senior-fullstack-engineer`
 - `jd_version`: `senior-fullstack-2026-08-14-v1`
-- `rubric_version`: `senior-fullstack-2026-08-18-v3`
+- `rubric_version`: `senior-fullstack-2026-08-24-v4`
 - 招聘优先级：5/5
 - HC：2
 - 业务范围：跨境物流核心业务、BFF、微服务、Vue3 中后台和 AI 工程化
 
 ## 预期结果
 
-候选人能够使用 Go 或 Node.js 承担 BFF/微服务交付，独立完成 Vue3/TypeScript 前端模块，并与算法工程师协作把 LLM、向量检索或 RAG 接入可靠业务链路。高级程度来自复杂约束、架构取舍、重构/性能和生产影响，而非头衔或年限本身。
+候选人首先应能够使用 Go 或 Node.js 承担 BFF/微服务与数据链路交付，同时能独立完成 Vue3/TypeScript 前端模块，并与算法工程师协作把 LLM、向量检索或 RAG 接入可靠业务链路。筛选时后端交付深度优先于前端广度；高级程度来自复杂约束、架构取舍、重构/性能和生产影响，而非头衔或年限本身。
 
 ## 正式 JD
 

@@ -155,7 +155,8 @@ class ScreeningValidatorTests(unittest.TestCase):
             with self.subTest(skill=skill_dir):
                 record = documented_record(skill_dir)
                 output = renderer.render_single(record)
-                self.assertIn(f"### 初筛结论｜{record['candidate_id']}", output)
+                self.assertIn("### 初筛结论｜", output)
+                self.assertIn(record["candidate_id"], output.splitlines()[0])
                 self.assertIn("| 规则版本 |", output)
                 self.assertIn("| 初筛建议（非最终） | 进入二审（非最终） |", output)
                 self.assertIn("一审待完成；二审待完成", output)
@@ -174,6 +175,10 @@ class ScreeningValidatorTests(unittest.TestCase):
                 self.assertLessEqual(
                     sum(line.startswith("- ") for line in evidence_section.splitlines()), 3
                 )
+                expected_first_evidence = (
+                    "- 后端主栈：" if skill_dir == SENIOR_DIR else "- 后端实现："
+                )
+                self.assertTrue(evidence_section.startswith(expected_first_evidence))
                 probe_section = output.split("面试优先验证\n\n", 1)[1].split(
                     "\n\n以上为非最终", 1
                 )[0]
@@ -209,8 +214,8 @@ class ScreeningValidatorTests(unittest.TestCase):
                 self.assertIn("| 候选人 ID | 初筛建议 |", output)
                 self.assertIn("## 二审队列", output)
                 self.assertEqual(output.count("### 初筛结论｜"), 1)
-                self.assertIn("### 初筛结论｜candidate-second", output)
-                self.assertNotIn("### 初筛结论｜candidate-advance", output)
+                self.assertRegex(output, r"### 初筛结论｜[^\n]*candidate-second")
+                self.assertNotRegex(output, r"### 初筛结论｜[^\n]*candidate-advance")
 
     def test_batch_renderer_rejects_duplicate_candidate_ids(self):
         for _, renderer, skill_dir in SKILLS:
@@ -607,6 +612,14 @@ class ScreeningValidatorTests(unittest.TestCase):
                 )
                 self.assertEqual(validator.validate_record(legacy), [])
 
+                previous = copy.deepcopy(current)
+                previous["rubric_version"] = (
+                    "senior-fullstack-2026-08-18-v3"
+                    if skill_dir == SENIOR_DIR
+                    else "fullstack-intern-2026-08-18-v3"
+                )
+                self.assertEqual(validator.validate_record(previous), [])
+
                 mismatched = copy.deepcopy(current)
                 mismatched["schema_version"] = "1.1"
                 self.assertTrue(
@@ -632,6 +645,18 @@ class ScreeningValidatorTests(unittest.TestCase):
         set_not_evidenced(intern, "INT-WEB-01")
         set_not_evidenced(intern, "INT-FE-01")
         self.assertTrue(any("two supported" in error for error in INTERN.validate_record(intern)))
+
+        intern_backend_shallow = make_advance(INTERN_DIR)
+        set_supported(intern_backend_shallow, "INT-WEB-01", "E1")
+        set_supported(intern_backend_shallow, "INT-DATA-01", "E1")
+        self.assertTrue(
+            any(
+                "INT-WEB-01 or INT-DATA-01 supported at E2" in error
+                for error in INTERN.validate_record(intern_backend_shallow)
+            )
+        )
+        intern_backend_shallow["rubric_version"] = INTERN.PREVIOUS_RUBRIC_VERSION
+        self.assertEqual(INTERN.validate_record(intern_backend_shallow), [])
 
     def test_low_confidence_decision_evidence_blocks_directional_recommendations(self):
         senior_advance = make_advance(SENIOR_DIR)
@@ -693,7 +718,7 @@ class ScreeningValidatorTests(unittest.TestCase):
     def test_explicit_criterion_contradiction_uses_directly_not_met(self):
         senior = make_advance(SENIOR_DIR)
         senior["schema_version"] = "1.2"
-        senior["rubric_version"] = "senior-fullstack-2026-08-18-v3"
+        senior["rubric_version"] = SENIOR.EXPECTED_RUBRIC_VERSION
         senior["model_recommendation"] = "do_not_advance_pending_human"
         senior["recommendation_rationale"] = "候选人明确陈述没有后端生产交付。"
         senior["recruiter_summary"]["critical_gaps"] = ["明确没有后端生产交付"]
@@ -702,7 +727,7 @@ class ScreeningValidatorTests(unittest.TestCase):
 
         intern = make_advance(INTERN_DIR)
         intern["schema_version"] = "1.2"
-        intern["rubric_version"] = "fullstack-intern-2026-08-18-v3"
+        intern["rubric_version"] = INTERN.EXPECTED_RUBRIC_VERSION
         intern["model_recommendation"] = "do_not_advance_pending_human"
         intern["recommendation_rationale"] = "候选人明确说明无法保证每周四天。"
         intern["recruiter_summary"]["critical_gaps"] = ["明确无法保证每周四天"]

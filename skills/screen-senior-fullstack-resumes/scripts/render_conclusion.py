@@ -26,14 +26,14 @@ EVIDENCE_PRIORITY = {
     criterion: index
     for index, criterion in enumerate(
         (
-            "SEN-LEVEL-01",
             "SEN-BE-01",
             "SEN-ARCH-01",
-            "SEN-FE-01",
             "SEN-DATA-01",
+            "SEN-LEVEL-01",
+            "SEN-EXP-01",
+            "SEN-FE-01",
             "SEN-AI-01",
             "SEN-DOMAIN-01",
-            "SEN-EXP-01",
             "SEN-ADM-01",
         )
     )
@@ -87,8 +87,8 @@ def _top_evidence(record: dict[str, Any], limit: int = 3) -> list[dict[str, Any]
     supported = [item for item in record["evidence"] if item.get("state") == "supported"]
     supported.sort(
         key=lambda item: (
-            -STRENGTH_RANK.get(item.get("strength"), -1),
             EVIDENCE_PRIORITY.get(item.get("criterion_id"), 999),
+            -STRENGTH_RANK.get(item.get("strength"), -1),
         )
     )
     return supported[:limit]

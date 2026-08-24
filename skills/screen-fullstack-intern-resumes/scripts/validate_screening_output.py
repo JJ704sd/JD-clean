@@ -15,10 +15,12 @@ SCHEMA_VERSION = "1.2"
 LEGACY_SCHEMA_VERSION = "1.1"
 EXPECTED_ROLE = "fullstack-development-intern"
 EXPECTED_JD_VERSION = "fullstack-intern-2026-08-14-v1"
-EXPECTED_RUBRIC_VERSION = "fullstack-intern-2026-08-18-v3"
+EXPECTED_RUBRIC_VERSION = "fullstack-intern-2026-08-24-v4"
+PREVIOUS_RUBRIC_VERSION = "fullstack-intern-2026-08-18-v3"
 LEGACY_RUBRIC_VERSION = "fullstack-intern-2026-08-18-v2"
 COMPATIBILITY_PAIRS = {
     (LEGACY_SCHEMA_VERSION, LEGACY_RUBRIC_VERSION),
+    (SCHEMA_VERSION, PREVIOUS_RUBRIC_VERSION),
     (SCHEMA_VERSION, EXPECTED_RUBRIC_VERSION),
 }
 CRITERIA = (
@@ -439,6 +441,18 @@ def _validate_recommendation(
         )
         if basic_supported < 2:
             errors.append("advance_pending_human requires at least two supported Web/front-end/data basics")
+        backend_implementation_supported = any(
+            evidence.get(cid, {}).get("state") == "supported"
+            and STRENGTH_RANK.get(evidence.get(cid, {}).get("strength"), -1) >= STRENGTH_RANK["E2"]
+            for cid in {"INT-WEB-01", "INT-DATA-01"}
+        )
+        if (
+            record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+            and not backend_implementation_supported
+        ):
+            errors.append(
+                "advance_pending_human requires INT-WEB-01 or INT-DATA-01 supported at E2 or above"
+            )
         decision_criteria = set(ADVANCE_MINIMUMS) | {
             criterion
             for criterion in BASIC_CRITERIA
