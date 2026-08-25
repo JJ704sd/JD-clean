@@ -10,10 +10,15 @@
   "candidate_name": "张三",
   "role": "senior-fullstack-engineer",
   "jd_version": "senior-fullstack-2026-08-14-v1",
-  "rubric_version": "senior-fullstack-2026-08-24-v4",
+  "rubric_version": "senior-fullstack-2026-08-25-v5",
   "screening_status": "non_final",
   "model_recommendation": "second_review",
   "recommendation_rationale": "后端、前端与生产影响证据较强，但 BFF 架构决策是否由候选人负责会改变推进判断。",
+  "priority_profile": {
+    "target_stack": "nodejs_only",
+    "refactoring_experience": "supported",
+    "logistics_experience": "supported"
+  },
   "recruiter_summary": {
     "strongest_matches": ["NestJS 生产后端交付", "Vue3 中后台独立实现", "有性能优化结果"],
     "critical_gaps": ["BFF 服务拆分的个人决策边界不清", "AI 工程化经历未提供（不单独阻断）"],
@@ -27,7 +32,7 @@
     {"criterion_id": "SEN-DATA-01", "state": "supported", "strength": "E2", "excerpt": "设计订单表并使用 Redis 缓存热点查询", "location": "项目 A", "rationale": "有数据模型和缓存工程动作", "confidence": "high"},
     {"criterion_id": "SEN-AI-01", "state": "not_evidenced", "strength": "E0", "excerpt": null, "location": null, "rationale": "简历未提供 AI/RAG 工程证据；单独不阻断", "confidence": "high"},
     {"criterion_id": "SEN-DOMAIN-01", "state": "supported", "strength": "E2", "excerpt": "负责跨境订单履约和轨迹异常处理模块", "location": "项目 A", "rationale": "有物流履约业务项目证据", "confidence": "high"},
-    {"criterion_id": "SEN-LEVEL-01", "state": "supported", "strength": "E3", "excerpt": "通过异步化将批处理耗时由 18 分钟降至 6 分钟", "location": "项目 B", "rationale": "包含问题、工程动作和量化结果", "confidence": "high"},
+    {"criterion_id": "SEN-LEVEL-01", "state": "supported", "strength": "E3", "excerpt": "主导订单批处理模块重构，通过异步化将耗时由 18 分钟降至 6 分钟", "location": "项目 B", "rationale": "包含重构对象、个人动作和量化结果", "confidence": "high"},
     {"criterion_id": "SEN-ADM-01", "state": "supported", "strength": "E1", "excerpt": "计算机科学与技术本科", "location": "教育经历", "rationale": "候选人明确提供行政信息", "confidence": "high"}
   ],
   "uncertainties": [
@@ -65,7 +70,8 @@
 
 ## 关键约束
 
-- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-08-24-v4`。校验器只为既有留档兼容读取 `1.2 + v3` 和 `1.1 + v2`；版本不能交叉混配，旧写入方应停止生成 v2/v3。
+- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-08-25-v5`。新校验器为既有留档兼容读取 `1.2 + v4`、`1.2 + v3` 和 `1.1 + v2`；版本不能交叉混配。旧记录仅保留审计兼容，不自动获得新语义；所有可能受主栈门槛和优先顺序影响的候选人必须用 v5 重筛，旧写入方应停止生成 v2–v4。
+- v5 的 `priority_profile` 为必填对象：`target_stack` 只允许 `go_present`、`nodejs_only`、`no_qualifying_go_or_nodejs`、`unclear`；重构和物流字段只允许 `supported`、`not_evidenced`、`unclear`。`go_present`/`nodejs_only` 必须有 `SEN-BE-01 >= E2`，物流状态必须与 `SEN-DOMAIN-01` 一致，重构 `supported` 必须回指 `SEN-LEVEL-01 >= E2` 的可定位重构证据。
 - `candidate_name` 是可选展示字段，只能转录简历明确给出的姓名，不得猜测或从邮箱推断；缺失时省略。姓名不参与证据与建议，`candidate_id` 仍是稳定审计主键。
 - 模型初筛始终为 `non_final`，不得伪造已完成的人审字段。
 - Schema 1.2 的人工终态必须记录带时区的 `level_1_reviewed_at`；需要二审时还必须记录 `level_2_reviewed_at`，且二审时间严格晚于一审。待审核状态的时间字段保持 `null`。

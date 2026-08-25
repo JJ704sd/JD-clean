@@ -139,6 +139,7 @@ def make_negative(skill_dir: str) -> dict:
         set_not_evidenced(record, "SEN-BE-01")
         set_not_evidenced(record, "SEN-ARCH-01")
         set_not_evidenced(record, "SEN-FE-01")
+        record["priority_profile"]["target_stack"] = "no_qualifying_go_or_nodejs"
     else:
         set_not_evidenced(record, "INT-BE-01")
         set_not_evidenced(record, "INT-WEB-01")
@@ -212,6 +213,10 @@ class ScreeningValidatorTests(unittest.TestCase):
                 output = renderer.render_batch([advance, second])
                 self.assertIn("共 2 份：建议推进 1，二审 1，暂不推进 0", output)
                 self.assertIn("| 候选人 ID | 初筛建议 |", output)
+                if skill_dir == SENIOR_DIR:
+                    self.assertIn(
+                        "| 初筛建议 | 主栈优先级 | 优先信号 |", output
+                    )
                 self.assertIn("## 二审队列", output)
                 self.assertEqual(output.count("### 初筛结论｜"), 1)
                 self.assertRegex(output, r"### 初筛结论｜[^\n]*candidate-second")
@@ -241,11 +246,116 @@ class ScreeningValidatorTests(unittest.TestCase):
     def test_missing_domain_bonus_does_not_block_advance(self):
         senior = make_advance(SENIOR_DIR)
         set_not_evidenced(senior, "SEN-DOMAIN-01")
+        senior["priority_profile"]["logistics_experience"] = "not_evidenced"
         self.assertEqual(SENIOR.validate_record(senior), [])
 
         intern = make_advance(INTERN_DIR)
         set_not_evidenced(intern, "INT-DOMAIN-01")
         self.assertEqual(INTERN.validate_record(intern), [])
+
+    def test_senior_v5_missing_go_or_node_is_a_negative_gate(self):
+        record = make_advance(SENIOR_DIR)
+        record["rubric_version"] = SENIOR.EXPECTED_RUBRIC_VERSION
+        record["priority_profile"] = {
+            "target_stack": "no_qualifying_go_or_nodejs",
+            "refactoring_experience": "supported",
+            "logistics_experience": "supported",
+        }
+        record["model_recommendation"] = "do_not_advance_pending_human"
+        record["recommendation_rationale"] = (
+            "简历没有达到项目级证据门槛的 Go 或 Node.js，未满足目标主栈硬门槛。"
+        )
+        record["recruiter_summary"]["critical_gaps"] = [
+            "未提供达到 E2 的 Go 或 Node.js 项目证据"
+        ]
+        set_not_evidenced(record, "SEN-BE-01")
+
+        self.assertEqual(SENIOR.validate_record(record), [])
+
+    def test_senior_v5_renderer_exposes_stack_and_preference_signals(self):
+        go_record = make_advance(SENIOR_DIR)
+        go_record["rubric_version"] = SENIOR.EXPECTED_RUBRIC_VERSION
+        go_record["priority_profile"] = {
+            "target_stack": "go_present",
+            "refactoring_experience": "supported",
+            "logistics_experience": "supported",
+        }
+        go_output = SENIOR_RENDERER.render_single(go_record)
+        self.assertIn("| 主栈优先级 | Go 优先 |", go_output)
+        self.assertIn("| 优先信号 | 重构经验、物流行业经验 |", go_output)
+
+        node_record = make_advance(SENIOR_DIR)
+        node_record["rubric_version"] = SENIOR.EXPECTED_RUBRIC_VERSION
+        node_record["priority_profile"] = {
+            "target_stack": "nodejs_only",
+            "refactoring_experience": "not_evidenced",
+            "logistics_experience": "not_evidenced",
+        }
+        set_not_evidenced(node_record, "SEN-DOMAIN-01")
+        node_output = SENIOR_RENDERER.render_single(node_record)
+        self.assertIn("| 主栈优先级 | 仅 Node.js（优先级较低） |", node_output)
+        self.assertIn("| 优先信号 | 未提供重构或物流行业项目证据 |", node_output)
+
+    def test_senior_v5_priority_profile_is_required_and_evidence_linked(self):
+        missing = make_advance(SENIOR_DIR)
+        missing.pop("priority_profile")
+        self.assertTrue(
+            any(
+                "priority_profile must be an object" in error
+                for error in SENIOR.validate_record(missing)
+            )
+        )
+
+        inconsistent_stack = make_advance(SENIOR_DIR)
+        inconsistent_stack["priority_profile"]["target_stack"] = (
+            "no_qualifying_go_or_nodejs"
+        )
+        self.assertTrue(
+            any(
+                "conflicts with qualifying SEN-BE-01" in error
+                for error in SENIOR.validate_record(inconsistent_stack)
+            )
+        )
+
+        inconsistent_logistics = make_advance(SENIOR_DIR)
+        inconsistent_logistics["priority_profile"]["logistics_experience"] = (
+            "not_evidenced"
+        )
+        self.assertTrue(
+            any(
+                "must match qualifying SEN-DOMAIN-01" in error
+                for error in SENIOR.validate_record(inconsistent_logistics)
+            )
+        )
+
+    def test_senior_v5_non_target_stack_cannot_use_transferability_review(self):
+        record = documented_record(SENIOR_DIR)
+        set_not_evidenced(record, "SEN-BE-01")
+        record["priority_profile"]["target_stack"] = "no_qualifying_go_or_nodejs"
+        record["uncertainties"][0].update(
+            {
+                "code": "U05_TRANSFERABILITY",
+                "description": "只有 Java/Python 等相邻后端栈",
+                "decision_impact": "相邻栈不能改变 Go/Node.js 硬门槛",
+                "required_human_action": "按主栈门槛改为暂不推进并完成人工一审",
+            }
+        )
+        record["human_review"].update(
+            {
+                "level_2_reason_codes": ["U05_TRANSFERABILITY"],
+                "independent_review_preferred": True,
+                "independent_review_fallback_reason": (
+                    "当前只有一名责任人，先采用分时盲审。"
+                ),
+            }
+        )
+
+        self.assertTrue(
+            any(
+                "cannot use U05_TRANSFERABILITY" in error
+                for error in SENIOR.validate_record(record)
+            )
+        )
 
     def test_strong_adjacent_stack_can_route_to_second_review(self):
         for validator, _, skill_dir in SKILLS:
@@ -288,6 +398,8 @@ class ScreeningValidatorTests(unittest.TestCase):
 
     def test_strong_or_fragmented_adjacent_evidence_blocks_negative_shortcuts(self):
         senior = make_advance(SENIOR_DIR)
+        senior["rubric_version"] = SENIOR.PREVIOUS_RUBRIC_VERSION
+        senior.pop("priority_profile")
         senior["model_recommendation"] = "do_not_advance_pending_human"
         senior["recruiter_summary"]["critical_gaps"] = ["目标主栈和前端栈未充分证明"]
         set_not_evidenced(senior, "SEN-BE-01")
@@ -605,6 +717,7 @@ class ScreeningValidatorTests(unittest.TestCase):
 
                 legacy = copy.deepcopy(current)
                 legacy["schema_version"] = "1.1"
+                legacy.pop("priority_profile", None)
                 legacy["rubric_version"] = (
                     "senior-fullstack-2026-08-18-v2"
                     if skill_dir == SENIOR_DIR
@@ -613,12 +726,19 @@ class ScreeningValidatorTests(unittest.TestCase):
                 self.assertEqual(validator.validate_record(legacy), [])
 
                 previous = copy.deepcopy(current)
+                previous.pop("priority_profile", None)
                 previous["rubric_version"] = (
-                    "senior-fullstack-2026-08-18-v3"
+                    "senior-fullstack-2026-08-24-v4"
                     if skill_dir == SENIOR_DIR
                     else "fullstack-intern-2026-08-18-v3"
                 )
                 self.assertEqual(validator.validate_record(previous), [])
+
+                if skill_dir == SENIOR_DIR:
+                    older = copy.deepcopy(current)
+                    older.pop("priority_profile", None)
+                    older["rubric_version"] = "senior-fullstack-2026-08-18-v3"
+                    self.assertEqual(validator.validate_record(older), [])
 
                 mismatched = copy.deepcopy(current)
                 mismatched["schema_version"] = "1.1"
@@ -723,6 +843,7 @@ class ScreeningValidatorTests(unittest.TestCase):
         senior["recommendation_rationale"] = "候选人明确陈述没有后端生产交付。"
         senior["recruiter_summary"]["critical_gaps"] = ["明确没有后端生产交付"]
         set_directly_not_met(senior, "SEN-BE-01", "E2")
+        senior["priority_profile"]["target_stack"] = "no_qualifying_go_or_nodejs"
         self.assertEqual(SENIOR.validate_record(senior), [])
 
         intern = make_advance(INTERN_DIR)
