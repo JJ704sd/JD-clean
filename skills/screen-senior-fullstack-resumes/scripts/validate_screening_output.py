@@ -15,7 +15,10 @@ SCHEMA_VERSION = "1.2"
 LEGACY_SCHEMA_VERSION = "1.1"
 EXPECTED_ROLE = "senior-fullstack-engineer"
 EXPECTED_JD_VERSION = "senior-fullstack-2026-08-14-v1"
-EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-08-25-v5"
+EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v8"
+V7_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v7"
+V6_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v6"
+V5_RUBRIC_VERSION = "senior-fullstack-2026-08-25-v5"
 PREVIOUS_RUBRIC_VERSION = "senior-fullstack-2026-08-24-v4"
 OLDER_RUBRIC_VERSION = "senior-fullstack-2026-08-18-v3"
 LEGACY_RUBRIC_VERSION = "senior-fullstack-2026-08-18-v2"
@@ -23,6 +26,9 @@ COMPATIBILITY_PAIRS = {
     (LEGACY_SCHEMA_VERSION, LEGACY_RUBRIC_VERSION),
     (SCHEMA_VERSION, OLDER_RUBRIC_VERSION),
     (SCHEMA_VERSION, PREVIOUS_RUBRIC_VERSION),
+    (SCHEMA_VERSION, V5_RUBRIC_VERSION),
+    (SCHEMA_VERSION, V6_RUBRIC_VERSION),
+    (SCHEMA_VERSION, V7_RUBRIC_VERSION),
     (SCHEMA_VERSION, EXPECTED_RUBRIC_VERSION),
 }
 CRITERIA = (
@@ -36,7 +42,7 @@ CRITERIA = (
     "SEN-LEVEL-01",
     "SEN-ADM-01",
 )
-ADVANCE_MINIMUMS = {
+V7_ADVANCE_MINIMUMS = {
     "SEN-EXP-01": "E2",
     "SEN-BE-01": "E2",
     "SEN-ARCH-01": "E2",
@@ -45,8 +51,18 @@ ADVANCE_MINIMUMS = {
     "SEN-LEVEL-01": "E3",
     "SEN-ADM-01": "E1",
 }
-NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-FE-01", "SEN-DATA-01"}
-DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
+V8_ADVANCE_MINIMUMS = {
+    "SEN-EXP-01": "E2",
+    "SEN-BE-01": "E2",
+    "SEN-ARCH-01": "E2",
+    "SEN-DATA-01": "E2",
+    "SEN-LEVEL-01": "E2",
+    "SEN-ADM-01": "E1",
+}
+V7_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-FE-01", "SEN-DATA-01"}
+V8_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-DATA-01", "SEN-LEVEL-01"}
+V7_DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
+V8_DIRECT_CRITICAL = {"SEN-BE-01"}
 INDEPENDENT_REVIEW_CODES = {
     "U05_TRANSFERABILITY",
     "U07_BIAS_OR_PROXY",
@@ -88,12 +104,13 @@ UNCERTAINTY_CODES = {
     "U10_RUBRIC_AMBIGUITY",
     "U11_UNTRUSTED_CONTENT",
 }
-TARGET_STACKS = {
+V5_TARGET_STACKS = {
     "go_present",
     "nodejs_only",
     "no_qualifying_go_or_nodejs",
     "unclear",
 }
+V6_TARGET_STACKS = {"go_present", "no_qualifying_go", "unclear"}
 PRIORITY_SIGNAL_STATES = {"supported", "not_evidenced", "unclear"}
 SOURCE_FACT_CODES = {
     "U01_PARSE_QUALITY",
@@ -105,6 +122,7 @@ PII_PATTERNS = (
     re.compile(r"\b1[3-9]\d{9}\b"),
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
 )
+GO_EVIDENCE_PATTERN = re.compile(r"(?i)(?:\bgo\b|golang|go-zero|\bgin\b)")
 
 
 def _nonempty(value: Any) -> bool:
@@ -270,8 +288,19 @@ def _validate_priority_profile(
     errors: list[str],
 ) -> None:
     profile = record.get("priority_profile")
-    current_rubric = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
-    if profile is None and not current_rubric:
+    rubric_version = record.get("rubric_version")
+    current_rubric = rubric_version in {
+        V6_RUBRIC_VERSION,
+        V7_RUBRIC_VERSION,
+        EXPECTED_RUBRIC_VERSION,
+    }
+    profile_required = rubric_version in {
+        V5_RUBRIC_VERSION,
+        V6_RUBRIC_VERSION,
+        V7_RUBRIC_VERSION,
+        EXPECTED_RUBRIC_VERSION,
+    }
+    if profile is None and not profile_required:
         return
     if not isinstance(profile, dict):
         errors.append("priority_profile must be an object for the current senior rubric")
@@ -282,7 +311,10 @@ def _validate_priority_profile(
         errors.append(f"priority_profile is missing field: {field}")
 
     target_stack = profile.get("target_stack")
-    if target_stack not in TARGET_STACKS:
+    allowed_target_stacks = V6_TARGET_STACKS if current_rubric else V5_TARGET_STACKS
+    if current_rubric and target_stack == "nodejs_only":
+        errors.append("priority_profile.target_stack=nodejs_only violates the current Go hard gate")
+    elif target_stack not in allowed_target_stacks:
         errors.append("priority_profile.target_stack is invalid")
     for field in ("refactoring_experience", "logistics_experience"):
         if profile.get(field) not in PRIORITY_SIGNAL_STATES:
@@ -297,17 +329,29 @@ def _validate_priority_profile(
         errors.append(
             "priority_profile.target_stack requires SEN-BE-01 supported at E2 or above"
         )
-    if target_stack in {"no_qualifying_go_or_nodejs", "unclear"} and qualifying_backend:
+    if (
+        current_rubric
+        and target_stack == "go_present"
+        and qualifying_backend
+        and not GO_EVIDENCE_PATTERN.search(str(backend.get("excerpt", "")))
+    ):
+        errors.append("current Go hard gate requires a Go evidence excerpt in SEN-BE-01")
+    no_qualifying_stack = (
+        target_stack == "no_qualifying_go"
+        if current_rubric
+        else target_stack == "no_qualifying_go_or_nodejs"
+    )
+    if (no_qualifying_stack or target_stack == "unclear") and qualifying_backend:
         errors.append(
             "priority_profile.target_stack conflicts with qualifying SEN-BE-01 evidence"
         )
     if (
         current_rubric
-        and target_stack == "no_qualifying_go_or_nodejs"
+        and target_stack == "no_qualifying_go"
         and "U05_TRANSFERABILITY" in uncertainty_codes
     ):
         errors.append(
-            "no qualifying Go/Node.js target stack cannot use U05_TRANSFERABILITY"
+            "no qualifying Go target stack cannot use U05_TRANSFERABILITY"
         )
 
     level = evidence.get("SEN-LEVEL-01", {})
@@ -516,38 +560,65 @@ def _validate_recommendation(
     record: dict[str, Any], evidence: dict[str, dict[str, Any]], probe_criteria: set[str], errors: list[str]
 ) -> None:
     recommendation = record.get("model_recommendation")
+    current_v8 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+    advance_minimums = V8_ADVANCE_MINIMUMS if current_v8 else V7_ADVANCE_MINIMUMS
+    negative_core = V8_NEGATIVE_CORE if current_v8 else V7_NEGATIVE_CORE
+    direct_critical = V8_DIRECT_CRITICAL if current_v8 else V7_DIRECT_CRITICAL
     if recommendation == "advance_pending_human":
-        for criterion, minimum in ADVANCE_MINIMUMS.items():
+        for criterion, minimum in advance_minimums.items():
             item = evidence.get(criterion, {})
             if item.get("state") != "supported" or STRENGTH_RANK.get(item.get("strength"), -1) < STRENGTH_RANK[minimum]:
                 errors.append(f"advance_pending_human requires {criterion} supported at {minimum} or above")
         if any(
             evidence.get(criterion, {}).get("confidence") == "low"
-            for criterion in ADVANCE_MINIMUMS
+            for criterion in advance_minimums
         ):
             errors.append("low-confidence decision evidence requires second review")
         ai = evidence.get("SEN-AI-01", {})
         if ai.get("state") != "supported" and "SEN-AI-01" not in probe_criteria:
             errors.append("missing AI evidence on an advance record requires an SEN-AI-01 interview probe")
+        frontend = evidence.get("SEN-FE-01", {})
+        if (
+            current_v8
+            and (
+                frontend.get("state") != "supported"
+                or STRENGTH_RANK.get(frontend.get("strength"), -1)
+                < STRENGTH_RANK["E2"]
+            )
+            and "SEN-FE-01" not in probe_criteria
+        ):
+            errors.append("v8 backend-heavy advance records require an SEN-FE-01 interview probe")
+        profile = record.get("priority_profile")
+        if (
+            record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+            and isinstance(profile, dict)
+            and profile.get("target_stack") != "go_present"
+        ):
+            errors.append("advance_pending_human requires the current Go hard gate")
     elif recommendation == "second_review":
         summary = record.get("recruiter_summary")
         if isinstance(summary, dict) and not summary.get("critical_gaps"):
             errors.append("second_review requires at least one critical gap or pending item")
     elif recommendation == "do_not_advance_pending_human":
         priority_profile = record.get("priority_profile")
-        missing_target_stack = (
-            record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
-            and isinstance(priority_profile, dict)
-            and priority_profile.get("target_stack") == "no_qualifying_go_or_nodejs"
+        missing_target_stack = isinstance(priority_profile, dict) and (
+            (
+                record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+                and priority_profile.get("target_stack") == "no_qualifying_go"
+            )
+            or (
+                record.get("rubric_version") == V5_RUBRIC_VERSION
+                and priority_profile.get("target_stack") == "no_qualifying_go_or_nodejs"
+            )
         )
         direct_not_met = any(
             evidence.get(cid, {}).get("state") == "directly_not_met"
-            for cid in DIRECT_CRITICAL
+            for cid in direct_critical
         )
         core_gaps = sum(
             evidence.get(cid, {}).get("state") == "not_evidenced"
             and evidence.get(cid, {}).get("strength") in {"E0", "E1"}
-            for cid in NEGATIVE_CORE
+            for cid in negative_core
         )
         admin_or_experience_not_met = any(
             evidence.get(cid, {}).get("state") == "directly_not_met"
@@ -572,7 +643,7 @@ def _validate_recommendation(
         if any(
             evidence.get(criterion, {}).get("confidence") == "low"
             and evidence.get(criterion, {}).get("state") in {"not_evidenced", "directly_not_met"}
-            for criterion in NEGATIVE_CORE | DIRECT_CRITICAL | {"SEN-EXP-01", "SEN-ADM-01"}
+            for criterion in negative_core | direct_critical | {"SEN-EXP-01", "SEN-ADM-01"}
         ):
             errors.append("low-confidence negative gate requires second review")
         if (

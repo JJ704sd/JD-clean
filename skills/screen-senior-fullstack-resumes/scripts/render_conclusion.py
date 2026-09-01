@@ -56,10 +56,11 @@ REVIEW_MODE_LABELS = {
     "not_required": "不需要",
 }
 STACK_PRIORITY_LABELS = {
-    "go_present": "Go 优先",
+    "go_present": "Go 已满足",
     "nodejs_only": "仅 Node.js（优先级较低）",
     "no_qualifying_go_or_nodejs": "不符合 Go/Node.js 主栈门槛",
-    "unclear": "Go/Node.js 主栈待确认",
+    "no_qualifying_go": "不符合 Go 硬门槛",
+    "unclear": "Go 门槛待确认",
 }
 
 
