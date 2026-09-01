@@ -89,8 +89,9 @@ SOURCE_FACT_CODES = {
 }
 PII_PATTERNS = (
     re.compile(r"\b[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]\b"),
-    re.compile(r"\b1[3-9]\d{9}\b"),
-    re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+    re.compile(r"(?<!\d)(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}(?!\d)"),
+    re.compile(r"(?<!\d)0\d{2,3}[\s-]?\d{7,8}(?!\d)"),
+    re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[\w-]+", re.IGNORECASE | re.UNICODE),
 )
 
 

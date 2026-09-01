@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import os
 import tempfile
@@ -15,6 +16,55 @@ from resume_screening.queue import TaskStore
 
 
 class CliTests(unittest.TestCase):
+    def test_export_review_queue_includes_task_id_for_calibration_import(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "【ai产品经理】候选人.md"
+            source.write_text("AI 产品需求、评测、上线和复盘 " * 12, encoding="utf-8")
+            database = root / "state.sqlite3"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--database",
+                        str(database),
+                        "enqueue",
+                        str(source),
+                        "--auto-route",
+                    ]
+                )
+            store = TaskStore(database)
+            task = store.claim_next()
+            store.mark_succeeded(
+                task.task_id,
+                result={
+                    "screening_record": {
+                        "role": "ai-product-manager",
+                        "model_recommendation": "advance",
+                    },
+                    "scorecard": {"score": 80, "grade": "B"},
+                },
+                api_response_id=None,
+                usage={},
+            )
+
+            with redirect_stdout(io.StringIO()):
+                code = main(
+                    [
+                        "--database",
+                        str(database),
+                        "export",
+                        "--directory",
+                        str(root / "exports"),
+                    ]
+                )
+
+            with (root / "exports" / "review_queue.csv").open(
+                "r", encoding="utf-8-sig", newline=""
+            ) as stream:
+                row = next(csv.DictReader(stream))
+            self.assertEqual(code, 0)
+            self.assertEqual(row["task_id"], str(task.task_id))
+
     def test_enqueue_today_filters_older_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import ctypes
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -20,6 +22,13 @@ def is_ignored_watch_file(path: str | Path) -> bool:
     lowered = name.casefold()
     if name.startswith(".") or name.startswith("~$"):
         return True
+    if os.name == "nt":
+        try:
+            attributes = ctypes.windll.kernel32.GetFileAttributesW(str(Path(path)))
+        except (AttributeError, OSError):
+            attributes = -1
+        if attributes != -1 and attributes & 0x2:
+            return True
     return Path(name).suffix.casefold() in TEMPORARY_SUFFIXES or lowered.endswith(
         ".crdownload"
     )
@@ -203,3 +212,4 @@ class WatchScanner:
             )
         return candidates
 
+    scan_once = scan

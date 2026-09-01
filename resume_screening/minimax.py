@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 DEFAULT_ENDPOINT = "https://api.minimaxi.com/v1/text/chatcompletion_v2"
 RETRYABLE_BUSINESS_CODES = {1000, 1001, 1002, 1013, 1024, 1033, 1041}
@@ -24,6 +25,14 @@ class RetryableModelError(ModelCallError):
 
 class AmbiguousModelError(ModelCallError):
     """A request may have completed remotely and must not be retried automatically."""
+
+
+class ProviderAuthError(RetryableModelError):
+    """Provider authentication/configuration failed before generation."""
+
+
+class ProviderRateLimitError(RetryableModelError):
+    """The provider applied a global rate limit before generation."""
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,9 @@ class MiniMaxClient:
         self.endpoint = (
             endpoint or os.environ.get("MINIMAX_API_ENDPOINT") or DEFAULT_ENDPOINT
         )
+        parsed_endpoint = urlsplit(self.endpoint)
+        if parsed_endpoint.scheme.casefold() != "https" or not parsed_endpoint.netloc:
+            raise ValueError("MINIMAX_API_ENDPOINT must be an HTTPS URL")
         self.timeout_seconds = timeout_seconds
 
     def analyze(
@@ -91,10 +103,15 @@ class MiniMaxClient:
             ) as response:
                 body = response.read()
         except urllib.error.HTTPError as exc:
-            detail = exc.read(1000).decode("utf-8", errors="replace")
-            if exc.code in {408, 409, 429, 500, 502, 503, 504}:
-                raise RetryableModelError(f"MiniMax HTTP {exc.code}: {detail}") from exc
-            raise ModelCallError(f"MiniMax HTTP {exc.code}: {detail}") from exc
+            # Provider error bodies can echo request content.  Keep the HTTP
+            # status as the diagnostic and never persist the response body.
+            if exc.code in {401, 403}:
+                raise ProviderAuthError(f"MiniMax HTTP {exc.code}") from exc
+            if exc.code == 429:
+                raise ProviderRateLimitError(f"MiniMax HTTP {exc.code}") from exc
+            if exc.code in {408, 409, 500, 502, 503, 504}:
+                raise RetryableModelError(f"MiniMax HTTP {exc.code}") from exc
+            raise ModelCallError(f"MiniMax HTTP {exc.code}") from exc
         except TimeoutError as exc:
             raise AmbiguousModelError(
                 "MiniMax request timed out after transmission"
@@ -118,6 +135,10 @@ class MiniMaxClient:
                     )
                     status_message = " ".join(status_message.split())[:300]
                     error = f"MiniMax API {status_code}: {status_message}"
+                    if status_code in {1004, 1005}:
+                        raise ProviderAuthError(error)
+                    if status_code in {1002, 1013}:
+                        raise ProviderRateLimitError(error)
                     if status_code in RETRYABLE_BUSINESS_CODES:
                         raise RetryableModelError(error)
                     raise ModelCallError(error)

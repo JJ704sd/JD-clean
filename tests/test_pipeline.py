@@ -26,8 +26,25 @@ def current_senior_record() -> dict:
     )
     assert match
     record = json.loads(match.group(1))
-    record["rubric_version"] = "senior-fullstack-2026-09-01-v6"
+    record["rubric_version"] = "senior-fullstack-2026-09-01-v8"
     record["priority_profile"]["target_stack"] = "go_present"
+    for item in record["evidence"]:
+        if item.get("state") == "supported":
+            item["evidence_factors"] = {
+                "project_context": "生产项目",
+                "personal_action": "候选人负责实现",
+                "method_or_tradeoff": "比较方案后落地",
+                "result_scope": "上线后按周期统计",
+                "verifiable_impact": "监控结果可核验",
+            }
+        else:
+            item["evidence_factors"] = {
+                "project_context": None,
+                "personal_action": None,
+                "method_or_tradeoff": None,
+                "result_scope": None,
+                "verifiable_impact": None,
+            }
     return record
 
 
@@ -87,7 +104,7 @@ class ScreeningPipelineTests(unittest.TestCase):
             candidate_id=candidate_id,
             role="senior-fullstack-engineer",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-01-v6",
+            rubric_version="senior-fullstack-2026-09-01-v8",
         )
 
     def test_successful_task_calls_model_once_and_writes_structured_outputs(self):
@@ -120,7 +137,7 @@ class ScreeningPipelineTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(envelope["scorecard"]["grade"], "B")
+            self.assertEqual(envelope["scorecard"]["grade"], "A")
             self.assertEqual(envelope["scorecard"]["review_status"], "second_review")
             self.assertTrue(
                 (root / "outputs" / "candidate-001" / "resume.cleaned.md").is_file()
