@@ -6,3 +6,6 @@ venv/
 .env
 .env.*
 !.env.example
+var/
+outputs/
+exports/

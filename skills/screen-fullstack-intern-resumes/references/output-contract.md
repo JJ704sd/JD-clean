@@ -10,7 +10,7 @@
   "candidate_name": "张三",
   "role": "fullstack-development-intern",
   "jd_version": "fullstack-intern-2026-08-14-v1",
-  "rubric_version": "fullstack-intern-2026-08-18-v3",
+  "rubric_version": "fullstack-intern-2026-08-24-v4",
   "screening_status": "non_final",
   "model_recommendation": "second_review",
   "recommendation_rationale": "课程项目具有可区分的全栈实现，但每周可实习天数未写，会影响岗位资格。",
@@ -66,7 +66,7 @@
 
 ## 关键约束
 
-- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: fullstack-intern-2026-08-18-v3`。校验器只为既有留档兼容读取 `1.1 + v2`；版本不能交叉混配，旧写入方应停止生成 v2。
+- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: fullstack-intern-2026-08-24-v4`。校验器只为既有留档兼容读取 `1.2 + v3` 和 `1.1 + v2`；版本不能交叉混配，旧写入方应停止生成 v2/v3。
 - `candidate_name` 是可选展示字段，只能转录简历明确给出的姓名，不得猜测或从邮箱推断；缺失时省略。姓名不参与证据与建议，`candidate_id` 仍是稳定审计主键。
 - 模型初筛始终为 `non_final`，不得伪造已完成的人审字段。
 - Schema 1.2 的人工终态必须记录带时区的 `level_1_reviewed_at`；需要二审时还必须记录 `level_2_reviewed_at`，且二审时间严格晚于一审。待审核状态的时间字段保持 `null`。

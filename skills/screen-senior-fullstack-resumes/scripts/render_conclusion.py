@@ -19,21 +19,21 @@ CRITERION_LABELS = {
     "SEN-DATA-01": "数据与中间件",
     "SEN-AI-01": "AI 工程化",
     "SEN-DOMAIN-01": "物流领域",
-    "SEN-LEVEL-01": "高级工程深度",
+    "SEN-LEVEL-01": "重构/高级工程深度",
     "SEN-ADM-01": "行政条件",
 }
 EVIDENCE_PRIORITY = {
     criterion: index
     for index, criterion in enumerate(
         (
-            "SEN-LEVEL-01",
             "SEN-BE-01",
             "SEN-ARCH-01",
-            "SEN-FE-01",
             "SEN-DATA-01",
+            "SEN-LEVEL-01",
+            "SEN-EXP-01",
+            "SEN-FE-01",
             "SEN-AI-01",
             "SEN-DOMAIN-01",
-            "SEN-EXP-01",
             "SEN-ADM-01",
         )
     )
@@ -54,6 +54,13 @@ REVIEW_MODE_LABELS = {
     "same_owner_separate_pass": "同责任人分时盲审",
     "independent_reviewer": "独立复核",
     "not_required": "不需要",
+}
+STACK_PRIORITY_LABELS = {
+    "go_present": "Go 已满足",
+    "nodejs_only": "仅 Node.js（优先级较低）",
+    "no_qualifying_go_or_nodejs": "不符合 Go/Node.js 主栈门槛",
+    "no_qualifying_go": "不符合 Go 硬门槛",
+    "unclear": "Go 门槛待确认",
 }
 
 
@@ -83,12 +90,31 @@ def _candidate_name(record: dict[str, Any]) -> str:
     return _clean(record.get("candidate_name") or "姓名未提供")
 
 
+def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
+    profile = record.get("priority_profile")
+    if not isinstance(profile, dict):
+        return "旧版记录未分类", "旧版记录未分类"
+    stack = STACK_PRIORITY_LABELS.get(profile.get("target_stack"), "主栈分类无效")
+    signals: list[str] = []
+    if profile.get("refactoring_experience") == "supported":
+        signals.append("重构经验")
+    elif profile.get("refactoring_experience") == "unclear":
+        signals.append("重构经验待确认")
+    if profile.get("logistics_experience") == "supported":
+        signals.append("物流行业经验")
+    elif profile.get("logistics_experience") == "unclear":
+        signals.append("物流行业经验待确认")
+    if not signals:
+        signals.append("未提供重构或物流行业项目证据")
+    return stack, "、".join(signals)
+
+
 def _top_evidence(record: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
     supported = [item for item in record["evidence"] if item.get("state") == "supported"]
     supported.sort(
         key=lambda item: (
-            -STRENGTH_RANK.get(item.get("strength"), -1),
             EVIDENCE_PRIORITY.get(item.get("criterion_id"), 999),
+            -STRENGTH_RANK.get(item.get("strength"), -1),
         )
     )
     return supported[:limit]
@@ -135,6 +161,7 @@ def render_single(
     _validate(record, allow_human_finalized)
     name = _candidate_name(record)
     candidate_id = _clean(record["candidate_id"])
+    stack_priority, priority_signals = _priority_labels(record)
     lines = [
         f"### 初筛结论｜{name}（{candidate_id}）",
         "",
@@ -143,6 +170,8 @@ def render_single(
         f"| 候选人 | {name}（{candidate_id}） |",
         f"| 岗位 | {ROLE_LABEL} |",
         f"| 规则版本 | {_clean(record['rubric_version'])} |",
+        f"| 主栈优先级 | {stack_priority} |",
+        f"| 优先信号 | {priority_signals} |",
         f"| 初筛建议（非最终） | {RECOMMENDATION_LABELS[record['model_recommendation']]} |",
         f"| 核心判断 | {_clip(record['recommendation_rationale'], 160)} |",
         f"| 人工复核 | {_review_line(record)} |",
@@ -188,8 +217,8 @@ def render_single(
                 "",
                 "## 结论汇总表",
                 "",
-                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
-                "|---|---|---|---|---|---|---|",
+                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 主栈优先级 | 优先信号 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
+                "|---|---|---|---|---|---|---|---|---|",
                 "| "
                 + " | ".join(
                     (
@@ -197,6 +226,8 @@ def render_single(
                         candidate_id,
                         ROLE_LABEL,
                         RECOMMENDATION_LABELS[record["model_recommendation"]],
+                        stack_priority,
+                        priority_signals,
                         _clip(record["recommendation_rationale"], 80),
                         _clip(gaps[0], 70) if gaps else "无关键缺口",
                         _clip(record["recruiter_summary"]["human_next_action"], 70),
@@ -234,10 +265,11 @@ def render_batch(
         f"- 规则版本：{_clean(first['rubric_version'])}",
         f"- 共 {len(records)} 份：建议推进 {counts['advance_pending_human']}，二审 {counts['second_review']}，暂不推进 {counts['do_not_advance_pending_human']}",
         "",
-        "| 候选人姓名 | 候选人 ID | 初筛建议 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 候选人姓名 | 候选人 ID | 初筛建议 | 主栈优先级 | 优先信号 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for record in records:
+        stack_priority, priority_signals = _priority_labels(record)
         top = _top_evidence(record, 1)
         strongest = (
             f"{CRITERION_LABELS[top[0]['criterion_id']]}：{_clip(top[0]['rationale'], 45)}"
@@ -259,6 +291,8 @@ def render_batch(
                     _candidate_name(record),
                     _clean(record["candidate_id"]),
                     RECOMMENDATION_LABELS[record["model_recommendation"]],
+                    stack_priority,
+                    priority_signals,
                     _clip(record["recommendation_rationale"], 55),
                     strongest,
                     gap,

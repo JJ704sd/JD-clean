@@ -1,7 +1,7 @@
 interface:
   display_name: "高级全栈简历初筛"
-  short_description: "依据物流全栈岗位证据矩阵生成可追溯且需人工复核的初筛建议"
-  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历，先输出简洁结构化结论卡，再说明所需人工复核动作。"
+  short_description: "按 Go 硬门槛兼容完整全栈与后端偏重画像，生成可复核建议"
+  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历，应用 Go 硬门槛，区分完整全栈与 Go 后端偏重画像，并显示个人责任、重构和物流优先信号，再输出简洁结论卡与人工复核动作。"
 
 policy:
   allow_implicit_invocation: true
