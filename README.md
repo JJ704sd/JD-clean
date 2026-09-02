@@ -136,6 +136,56 @@ uv run --locked python -m resume_screening --database D:\screening\state.sqlite3
   --output D:\screening\outputs worker --once
 ```
 
+## 飞书简历闭环监控
+
+`scripts/feishu_resume_monitor.py` 将下载目录中的 `.pdf` 简历做成可恢复的闭环：每轮先读取 Base 表结构、视图和全量记录，默认只接收当前岗位前缀 `【全栈工程师_深圳 15-25K】` 并按固定 `PDF_KEY_RULE` 做唯一匹配，再执行本地提取/OCR、脱敏和结构化 Markdown；同一飞书文件夹使用独立的跨进程周期锁串行化状态核验、导入决策和实际导入，异步任务会续查，文档 URL 只取 CLI 实际返回值，随后回读并检查正文。监控器本身不调用模型；加上 `--screening` 后，仅在文档回读成功后把任务交给现有 SQLite 筛选队列。
+
+首次接入或表结构发生变化时，必须先用 dry-run 为当前字段结构建立本地门禁：
+
+```powershell
+$env:FEISHU_BASE_TOKEN = "通过受控环境注入，不要写入脚本或日志"
+$env:FEISHU_PDF_DIR = "$env:USERPROFILE\Downloads"
+$env:DRY_RUN = "true"
+uv run --locked python scripts\feishu_resume_monitor.py --once `
+  --seed-report "D:\JD clean\outputs\feishu-batch-2026-09-02\batch-report.json"
+```
+
+这里的 `--seed-report` 用于吸收本次已成功导入的 9 份文档；以后新增监控轮次不再重复创建它们。若换了批次或环境，应明确替换为对应的成功批次报告。
+
+接入现有岗位匹配、证据提取和确定性评分脚手架时，先运行一次 dry-run（此时只建立门禁和本地状态，不入 AI 队列）：
+
+```powershell
+uv run --locked python scripts\feishu_resume_monitor.py --once --dry-run --screening `
+  --seed-report "D:\JD clean\outputs\feishu-batch-2026-09-02\batch-report.json"
+```
+
+确认报告后，用 apply 将“文档已成功回读”的简历交给现有筛选队列：
+
+```powershell
+uv run --locked python scripts\feishu_resume_monitor.py --once --apply --screening
+```
+
+再启动已有的模型 worker 消费队列；模型密钥只由 worker 从 `MINIMAX_API_KEY` 读取，监控器不接触该密钥：
+
+```powershell
+uv run --locked python -m resume_screening `
+  --database "var\screening-v8.sqlite3" `
+  --output "outputs" worker --watch --poll-seconds 5
+```
+
+持续运行时，将第二条命令改为 `--watch --apply --screening --interval-seconds 300`，并保持上述 worker 单独运行。当前岗位前缀默认映射到 `senior-fullstack-engineer`；更换岗位时必须显式指定 `--screening-role` 并重新 dry-run。worker 会复用现有岗位 Skill/Rubric、模型证据提取、Python 确定性评分、`screening.json`、`conclusion.md` 和人工复核队列；模型结果仍是 `non_final`，不会自动淘汰或写入最终招聘状态。
+
+确认报告后再启动实际监控：
+
+```powershell
+$env:DRY_RUN = "false"
+uv run --locked python scripts\feishu_resume_monitor.py --watch --apply --screening --interval-seconds 300
+```
+
+本次已完成的批次可以用 `--seed-report` 写入本地幂等状态，避免当前 Base 尚未补字段时重复导入已有文档。状态保存在 `var/feishu-resume-monitor/state.json`，当前轮报告为 `outputs/feishu-resume-monitor/batch-report.json`，历史摘要为 `batch-history.ndjson`。已有文档链接或相同源哈希默认跳过；文档回读和 Base 操作的临时网络错误/限流单次最多重试 3 次，当前 `drive +import` 没有 CLI 幂等键，临时错误且没有 URL/ticket 时会保留为 `import_pending`，不会在下一轮或 `--retry-failed` 中盲目重放，权限、认证和格式错误不自动重试。
+
+只有配置的“简历文档链接、处理状态、错误信息、处理时间、源 PDF 哈希”字段全部存在且类型可写时，成功回读的文档才会触发 `base +record-batch-update`，随后使用 `base +record-get` 核验。字段缺失时仍可完成 Markdown、文档导入和本地 AI 筛选队列交接，但 Base 写回与 NEXT_ACTION 保持关闭；新增字段后需重新运行一次 dry-run。
+
 ## 输出
 
 每位候选人的当前结果位于：

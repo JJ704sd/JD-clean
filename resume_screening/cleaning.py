@@ -28,8 +28,12 @@ IDENTITY_RE = re.compile(
 ADDRESS_LINE_RE = re.compile(
     r"(?im)^(?:现居住?地|家庭住址|详细地址|通讯地址)\s*[:：].*$"
 )
+# PDF text extraction may concatenate this platform marker with adjacent
+# words. The marker has a 17-character hex prefix and a ``~~`` terminator;
+# anchoring on that prefix avoids consuming a legitimate word such as
+# ``Boot`` when the marker is concatenated with it.
 OPAQUE_PLATFORM_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}~~(?![A-Za-z0-9_-])"
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{17}[A-Za-z0-9_-]{19,}~~"
 )
 
 

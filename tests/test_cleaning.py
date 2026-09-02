@@ -90,6 +90,20 @@ class ResumeCleaningTests(unittest.TestCase):
         self.assertNotIn(token, result.model_text)
         self.assertIn("OCR正文", result.model_text)
 
+    def test_opaque_platform_tokens_are_removed_when_concatenated(self):
+        token = "ac3bc4dd08a18ecb1Hx72N24GVNTw4m4WPudWOOnm_DTPxRg2Q~~"
+        source_text = (
+            "Spring Boot" + token + "3.x 微服务架构，负责订单系统开发、测试、上线和运维。"
+        ) * 4
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "concatenated-token.txt"
+            source.write_text(source_text, encoding="utf-8")
+            result = clean_resume(source, candidate_id="candidate-concatenated-token")
+
+        self.assertNotIn(token, result.markdown)
+        self.assertNotIn(token, result.model_text)
+        self.assertIn("Spring Boot3.x", result.model_text)
+
     def test_text_resume_becomes_traceable_markdown_and_redacted_model_input(self):
         source_text = """张三
 电话：13812345678  邮箱：candidate@example.com
