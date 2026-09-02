@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -14,16 +15,25 @@ from xml.etree import ElementTree
 PARSER_VERSION = "resume-cleaner-2026-09-01-v2"
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
 
-EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-PHONE_RE = re.compile(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)")
+EMAIL_RE = re.compile(
+    r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[\w-]+", re.IGNORECASE | re.UNICODE
+)
+PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}(?!\d)"
+)
+LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}[\s-]?\d{7,8}(?!\d)")
 IDENTITY_RE = re.compile(
     r"(?<!\d)[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[0-9Xx](?!\d)"
 )
 ADDRESS_LINE_RE = re.compile(
     r"(?im)^(?:现居住?地|家庭住址|详细地址|通讯地址)\s*[:：].*$"
 )
+# PDF text extraction may concatenate this platform marker with adjacent
+# words. The marker has a 17-character hex prefix and a ``~~`` terminator;
+# anchoring on that prefix avoids consuming a legitimate word such as
+# ``Boot`` when the marker is concatenated with it.
 OPAQUE_PLATFORM_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}~~(?![A-Za-z0-9_-])"
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{17}[A-Za-z0-9_-]{19,}~~"
 )
 
 
@@ -153,12 +163,16 @@ def _quality_check(pages: Iterable[str]) -> None:
 
 
 def redact_for_model(text: str, *, candidate_name: str | None = None) -> str:
-    redacted = EMAIL_RE.sub("[已脱敏邮箱]", text)
+    redacted = unicodedata.normalize("NFKC", text)
+    redacted = EMAIL_RE.sub("[已脱敏邮箱]", redacted)
     redacted = PHONE_RE.sub("[已脱敏电话]", redacted)
+    redacted = LANDLINE_RE.sub("[已脱敏电话]", redacted)
     redacted = IDENTITY_RE.sub("[已脱敏证件号]", redacted)
     redacted = ADDRESS_LINE_RE.sub("[已脱敏地址]", redacted)
     if candidate_name and candidate_name.strip():
-        redacted = redacted.replace(candidate_name.strip(), "[候选人]")
+        redacted = redacted.replace(
+            unicodedata.normalize("NFKC", candidate_name.strip()), "[候选人]"
+        )
     return redacted
 
 
@@ -195,6 +209,7 @@ def clean_resume(
     for index, page in enumerate(pages, start=1):
         body_parts.extend((f"## 第 {index} 页", "", page.strip(), ""))
     body = "\n".join(body_parts).rstrip() + "\n"
+    redacted_body = redact_for_model(body, candidate_name=candidate_name)
     markdown = (
         "---\n"
         f"candidate_id: {candidate_id}\n"
@@ -203,14 +218,14 @@ def clean_resume(
         f"generated_at: {generated_at}\n"
         f"used_ocr: {str(used_ocr).lower()}\n"
         f"page_count: {len(pages)}\n"
-        "---\n\n" + body
+        "---\n\n" + redacted_body
     )
     return CleanedResume(
         source_path=path,
         source_sha256=source_sha256,
         candidate_id=candidate_id,
         markdown=markdown,
-        model_text=redact_for_model(body, candidate_name=candidate_name),
+        model_text=redacted_body,
         used_ocr=used_ocr,
         page_count=len(pages),
     )

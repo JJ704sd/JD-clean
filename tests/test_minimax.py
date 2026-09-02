@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
+import urllib.error
 from unittest.mock import Mock, patch
 
 from resume_screening.minimax import (
@@ -26,6 +28,28 @@ class FakeHttpResponse:
 
 
 class MiniMaxClientTests(unittest.TestCase):
+    def test_endpoint_must_use_https(self):
+        with self.assertRaises(ValueError):
+            MiniMaxClient(api_key="test-key", endpoint="http://example.test/chat")
+
+    def test_http_error_does_not_keep_provider_body_in_exception(self):
+        error = urllib.error.HTTPError(
+            "https://example.test/chat",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO("简历正文 13812345678 candidate@example.com".encode()),
+        )
+        client = MiniMaxClient(api_key="test-key")
+        with (
+            patch("urllib.request.urlopen", side_effect=error),
+            self.assertRaises(RetryableModelError) as caught,
+        ):
+            client.analyze(system_prompt="policy", resume_text="resume")
+
+        self.assertNotIn("13812345678", str(caught.exception))
+        self.assertNotIn("candidate@example.com", str(caught.exception))
+
     def test_default_request_uses_domestic_endpoint(self):
         response = FakeHttpResponse(
             {

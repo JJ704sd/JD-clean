@@ -90,6 +90,20 @@ class ResumeCleaningTests(unittest.TestCase):
         self.assertNotIn(token, result.model_text)
         self.assertIn("OCR正文", result.model_text)
 
+    def test_opaque_platform_tokens_are_removed_when_concatenated(self):
+        token = "ac3bc4dd08a18ecb1Hx72N24GVNTw4m4WPudWOOnm_DTPxRg2Q~~"
+        source_text = (
+            "Spring Boot" + token + "3.x 微服务架构，负责订单系统开发、测试、上线和运维。"
+        ) * 4
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "concatenated-token.txt"
+            source.write_text(source_text, encoding="utf-8")
+            result = clean_resume(source, candidate_id="candidate-concatenated-token")
+
+        self.assertNotIn(token, result.markdown)
+        self.assertNotIn(token, result.model_text)
+        self.assertIn("Spring Boot3.x", result.model_text)
+
     def test_text_resume_becomes_traceable_markdown_and_redacted_model_input(self):
         source_text = """张三
 电话：13812345678  邮箱：candidate@example.com
@@ -107,11 +121,28 @@ class ResumeCleaningTests(unittest.TestCase):
         self.assertIn("candidate_id: candidate-001", result.markdown)
         self.assertIn("source_sha256:", result.markdown)
         self.assertIn("## 第 1 页", result.markdown)
-        self.assertIn("13812345678", result.markdown)
+        self.assertNotIn("13812345678", result.markdown)
+        self.assertIn("[已脱敏电话]", result.markdown)
         self.assertNotIn("13812345678", result.model_text)
         self.assertNotIn("candidate@example.com", result.model_text)
         self.assertNotIn("张三", result.model_text)
         self.assertIn("[已脱敏电话]", result.model_text)
+
+    def test_model_and_cleaned_markdown_redact_formatted_contact_values(self):
+        source_text = (
+            "候选人经历：负责 Go 订单服务和生产上线。"
+            "电话：138 1234 5678，座机：010-12345678，邮箱：张三@例子.中国。"
+        ) * 4
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "resume.txt"
+            source.write_text(source_text, encoding="utf-8")
+            result = clean_resume(source, candidate_id="candidate-formatted")
+
+        for value in ("138 1234 5678", "010-12345678", "张三@例子.中国"):
+            self.assertNotIn(value, result.model_text)
+            self.assertNotIn(value, result.markdown)
+        self.assertGreaterEqual(result.model_text.count("[已脱敏电话]"), 2)
+        self.assertIn("[已脱敏邮箱]", result.markdown)
 
     def test_low_quality_resume_stops_before_screening(self):
         with tempfile.TemporaryDirectory() as tmp:
