@@ -200,8 +200,10 @@ uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply 
 ```text
 候选人文档 · 在线简历
 
-• 张三  简历：https://example.feishu.cn/docx/abc
+• 张三  简历：https://tenant.feishu.cn/docx/<document-token>
 ```
+
+上面的 URL 仅用于展示格式，不可访问；正式列表必须直接使用 `drive +import` 成功返回并通过回读校验的 `doc_url`，不要复制 `example.feishu.cn` 或自行拼接文档 token。
 
 然后启动现有 worker 消费队列。默认模型为 `MiniMax-M3`，默认端点为中国服务商 MiniMax 开放平台 `https://api.minimaxi.com/v1/text/chatcompletion_v2`；模型只负责提取岗位证据，Python 继续按固定 rubric 确定性评分并生成 `screening.json`、`conclusion.md` 和人工复核状态：
 
