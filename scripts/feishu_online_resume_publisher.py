@@ -387,20 +387,10 @@ def _markdown_cell(value: Any) -> str:
 
 
 def _write_index(path: Path, rows: list[tuple[str, str]], *, dry_run: bool) -> None:
-    lines = [
-        "# 全栈工程师清洗后在线简历",
-        "",
-        "| 候选人文档 | 在线简历 |",
-        "| ----- | ----- |",
-    ]
+    lines = ["候选人文档 · 在线简历"]
     if rows:
-        lines.extend(
-            f"| {_markdown_cell(name)} | [打开简历]({url}) |" for name, url in rows
-        )
-    elif dry_run:
-        lines.append("| 暂无 | dry-run 未执行飞书导入 |")
-    else:
-        lines.append("| 暂无 | 没有完成正文回读的在线文档 |")
+        lines.append("")
+        lines.extend(f"• {_markdown_cell(name)}  简历：{url}" for name, url in rows)
     _atomic_write(path, "\n".join(lines) + "\n")
 
 

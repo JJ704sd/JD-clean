@@ -89,12 +89,31 @@ class OnlineResumePublisherTests(unittest.TestCase):
             self.assertEqual(report["summary"]["success"], 1)
             self.assertEqual(report["feishu_imports"], 1)
             importer.import_and_readback.assert_called_once()
-            self.assertIn("https://example.feishu.cn/docx/abc", (root / "resume-index.md").read_text(encoding="utf-8"))
+            self.assertEqual(
+                (root / "resume-index.md").read_text(encoding="utf-8"),
+                "候选人文档 · 在线简历\n\n• 张三  简历：https://example.feishu.cn/docx/abc\n",
+            )
 
             second_importer = Mock()
             second = run_cycle(apply_config, importer=second_importer)
             self.assertEqual(second["summary"]["already_published"], 1)
             second_importer.import_and_readback.assert_not_called()
+
+    def test_empty_online_resume_index_contains_only_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self._config(root, dry_run=True)
+
+            with patch(
+                "scripts.feishu_online_resume_publisher._iter_pdf_files",
+                return_value=[],
+            ):
+                run_cycle(config)
+
+            self.assertEqual(
+                (root / "resume-index.md").read_text(encoding="utf-8"),
+                "候选人文档 · 在线简历\n",
+            )
 
     def test_import_pending_is_retained_without_automatic_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
