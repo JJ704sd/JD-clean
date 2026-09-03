@@ -186,6 +186,31 @@ uv run --locked python scripts\feishu_resume_monitor.py --watch --apply --screen
 
 只有配置的“简历文档链接、处理状态、错误信息、处理时间、源 PDF 哈希”字段全部存在且类型可写时，成功回读的文档才会触发 `base +record-batch-update`，随后使用 `base +record-get` 核验。字段缺失时仍可完成 Markdown、文档导入和本地 AI 筛选队列交接，但 Base 写回与 NEXT_ACTION 保持关闭；新增字段后需重新运行一次 dry-run。
 
+## 在线简历发布器与 MiniMax-M3 筛选
+
+如果不需要读取或写回 Base，只需把本地 PDF 发布为飞书文档并生成本地链接列表，可使用 `scripts/feishu_online_resume_publisher.py`。默认只做本地提取/OCR、清洗脱敏和 dry-run；加 `--screening` 后，`--apply` 只有在飞书文档回读非空时才会把任务交给筛选队列，发布器自身不会调用模型或发送群消息：
+
+```powershell
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply --screening
+```
+
+如需处理历史下载文件，两个命令都加上 `--all-dates`；岗位前缀变化时，两个命令都必须使用相同的 `--job-prefix`，并重新执行 dry-run。链接列表写入 `resume-index.md`，格式为纯文本：
+
+```text
+候选人文档 · 在线简历
+
+• 张三  简历：https://example.feishu.cn/docx/abc
+```
+
+然后启动现有 worker 消费队列。默认模型为 `MiniMax-M3`，默认端点为中国服务商 MiniMax 开放平台 `https://api.minimaxi.com/v1/text/chatcompletion_v2`；模型只负责提取岗位证据，Python 继续按固定 rubric 确定性评分并生成 `screening.json`、`conclusion.md` 和人工复核状态：
+
+```powershell
+uv run --locked python -m resume_screening `
+  --database "var\screening-v8.sqlite3" `
+  --output "outputs" worker --watch --poll-seconds 5
+```
+
 ## 输出
 
 每位候选人的当前结果位于：

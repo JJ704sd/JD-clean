@@ -7,7 +7,14 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from scripts.feishu_online_resume_publisher import OnlineFeishuImporter, PublisherConfig, run_cycle
+from scripts.feishu_online_resume_publisher import (
+    OnlineFeishuImporter,
+    PublisherConfig,
+    _config_from_args,
+    _parser,
+    run_cycle,
+)
+from resume_screening.queue import TaskStore
 
 
 class OnlineResumePublisherTests(unittest.TestCase):
@@ -99,6 +106,61 @@ class OnlineResumePublisherTests(unittest.TestCase):
             self.assertEqual(second["summary"]["already_published"], 1)
             second_importer.import_and_readback.assert_not_called()
 
+    def test_apply_handoffs_readback_to_screening_queue_without_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._source(root)
+            screening_database = root / "screening.sqlite3"
+            screening_output = root / "screening-output"
+            dry_config = replace(
+                self._config(root, dry_run=True),
+                screening_enabled=True,
+                screening_database=screening_database,
+                screening_output_directory=screening_output,
+            )
+
+            with patch(
+                "scripts.feishu_online_resume_publisher.prepare_markdown",
+                self._fake_prepare,
+            ):
+                dry_report = run_cycle(dry_config)
+
+            self.assertEqual(dry_report["screening_queue_handoffs"], 0)
+            self.assertEqual(dry_report["model_calls"], 0)
+            self.assertEqual(dry_report["items"][0]["screening"]["status"], "blocked")
+            self.assertFalse(screening_database.exists())
+
+            importer = Mock()
+            importer.import_and_readback.return_value = {
+                "status": "success",
+                "doc_url": "https://example.feishu.cn/docx/abc",
+                "readback_nonempty": True,
+                "readback_chars": 500,
+            }
+            apply_config = replace(dry_config, dry_run=False)
+            with patch(
+                "scripts.feishu_online_resume_publisher.prepare_markdown",
+                self._fake_prepare,
+            ):
+                report = run_cycle(apply_config, importer=importer)
+
+            item = report["items"][0]
+            self.assertEqual(report["summary"]["success"], 1)
+            self.assertEqual(report["screening_queue_handoffs"], 1)
+            self.assertEqual(report["screening_queue_failures"], 0)
+            self.assertEqual(report["model_calls"], 0)
+            self.assertEqual(item["screening"]["status"], "queued")
+            self.assertEqual(item["screening"]["model"], "MiniMax-M3")
+            self.assertEqual(item["screening"]["role"], "senior-fullstack-engineer")
+            self.assertEqual(TaskStore(screening_database).status_counts(), {"queued": 1})
+
+            second_importer = Mock()
+            second = run_cycle(apply_config, importer=second_importer)
+            self.assertEqual(second["summary"]["already_published"], 1)
+            self.assertEqual(second["items"][0]["screening"]["status"], "queued")
+            second_importer.import_and_readback.assert_not_called()
+            self.assertEqual(TaskStore(screening_database).status_counts(), {"queued": 1})
+
     def test_empty_online_resume_index_contains_only_title(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -114,6 +176,29 @@ class OnlineResumePublisherTests(unittest.TestCase):
                 (root / "resume-index.md").read_text(encoding="utf-8"),
                 "候选人文档 · 在线简历\n",
             )
+
+    def test_screening_cli_defaults_to_domestic_minimax_m3_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = _parser().parse_args(
+                [
+                    "--screening",
+                    "--source-dir",
+                    str(root / "downloads"),
+                    "--screening-database",
+                    str(root / "screening.sqlite3"),
+                    "--screening-output",
+                    str(root / "screening-output"),
+                ]
+            )
+
+            config = _config_from_args(args)
+
+            self.assertTrue(config.screening_enabled)
+            self.assertEqual(config.screening_model, "MiniMax-M3")
+            self.assertEqual(config.screening_role, "senior-fullstack-engineer")
+            self.assertEqual(config.screening_database, (root / "screening.sqlite3").resolve())
+            self.assertEqual(config.screening_output_directory, (root / "screening-output").resolve())
 
     def test_import_pending_is_retained_without_automatic_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
