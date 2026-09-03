@@ -15,7 +15,8 @@ SCHEMA_VERSION = "1.2"
 LEGACY_SCHEMA_VERSION = "1.1"
 EXPECTED_ROLE = "senior-fullstack-engineer"
 EXPECTED_JD_VERSION = "senior-fullstack-2026-08-14-v1"
-EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v8"
+EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-09-03-v9"
+V8_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v8"
 V7_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v7"
 V6_RUBRIC_VERSION = "senior-fullstack-2026-09-01-v6"
 V5_RUBRIC_VERSION = "senior-fullstack-2026-08-25-v5"
@@ -29,6 +30,7 @@ COMPATIBILITY_PAIRS = {
     (SCHEMA_VERSION, V5_RUBRIC_VERSION),
     (SCHEMA_VERSION, V6_RUBRIC_VERSION),
     (SCHEMA_VERSION, V7_RUBRIC_VERSION),
+    (SCHEMA_VERSION, V8_RUBRIC_VERSION),
     (SCHEMA_VERSION, EXPECTED_RUBRIC_VERSION),
 }
 CRITERIA = (
@@ -59,10 +61,13 @@ V8_ADVANCE_MINIMUMS = {
     "SEN-LEVEL-01": "E2",
     "SEN-ADM-01": "E1",
 }
+V9_ADVANCE_MINIMUMS = V8_ADVANCE_MINIMUMS
 V7_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-FE-01", "SEN-DATA-01"}
 V8_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-DATA-01", "SEN-LEVEL-01"}
+V9_NEGATIVE_CORE = V8_NEGATIVE_CORE
 V7_DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
 V8_DIRECT_CRITICAL = {"SEN-BE-01"}
+V9_DIRECT_CRITICAL = V8_DIRECT_CRITICAL
 INDEPENDENT_REVIEW_CODES = {
     "U05_TRANSFERABILITY",
     "U07_BIAS_OR_PROXY",
@@ -111,6 +116,12 @@ V5_TARGET_STACKS = {
     "unclear",
 }
 V6_TARGET_STACKS = {"go_present", "no_qualifying_go", "unclear"}
+V9_TARGET_STACKS = {
+    "go_present",
+    "logistics_flexible_backend",
+    "no_qualifying_go",
+    "unclear",
+}
 PRIORITY_SIGNAL_STATES = {"supported", "not_evidenced", "unclear"}
 SOURCE_FACT_CODES = {
     "U01_PARSE_QUALITY",
@@ -293,12 +304,14 @@ def _validate_priority_profile(
     current_rubric = rubric_version in {
         V6_RUBRIC_VERSION,
         V7_RUBRIC_VERSION,
+        V8_RUBRIC_VERSION,
         EXPECTED_RUBRIC_VERSION,
     }
     profile_required = rubric_version in {
         V5_RUBRIC_VERSION,
         V6_RUBRIC_VERSION,
         V7_RUBRIC_VERSION,
+        V8_RUBRIC_VERSION,
         EXPECTED_RUBRIC_VERSION,
     }
     if profile is None and not profile_required:
@@ -312,7 +325,12 @@ def _validate_priority_profile(
         errors.append(f"priority_profile is missing field: {field}")
 
     target_stack = profile.get("target_stack")
-    allowed_target_stacks = V6_TARGET_STACKS if current_rubric else V5_TARGET_STACKS
+    current_v9 = rubric_version == EXPECTED_RUBRIC_VERSION
+    current_v8 = rubric_version == V8_RUBRIC_VERSION
+    if current_v9:
+        allowed_target_stacks = V9_TARGET_STACKS
+    else:
+        allowed_target_stacks = V6_TARGET_STACKS if current_rubric else V5_TARGET_STACKS
     if current_rubric and target_stack == "nodejs_only":
         errors.append("priority_profile.target_stack=nodejs_only violates the current Go hard gate")
     elif target_stack not in allowed_target_stacks:
@@ -326,7 +344,19 @@ def _validate_priority_profile(
         backend.get("state") == "supported"
         and STRENGTH_RANK.get(backend.get("strength"), -1) >= STRENGTH_RANK["E2"]
     )
-    if target_stack in {"go_present", "nodejs_only"} and not qualifying_backend:
+    qualifying_go = qualifying_backend and bool(
+        GO_EVIDENCE_PATTERN.search(str(backend.get("excerpt", "")))
+    )
+    domain = evidence.get("SEN-DOMAIN-01", {})
+    qualifying_domain = (
+        domain.get("state") == "supported"
+        and STRENGTH_RANK.get(domain.get("strength"), -1) >= STRENGTH_RANK["E2"]
+    )
+    if target_stack in {
+        "go_present",
+        "nodejs_only",
+        "logistics_flexible_backend",
+    } and not qualifying_backend:
         errors.append(
             "priority_profile.target_stack requires SEN-BE-01 supported at E2 or above"
         )
@@ -334,20 +364,34 @@ def _validate_priority_profile(
         current_rubric
         and target_stack == "go_present"
         and qualifying_backend
-        and not GO_EVIDENCE_PATTERN.search(str(backend.get("excerpt", "")))
+        and not qualifying_go
     ):
         errors.append("current Go hard gate requires a Go evidence excerpt in SEN-BE-01")
+    if current_v9 and target_stack == "logistics_flexible_backend":
+        if qualifying_go:
+            errors.append(
+                "logistics_flexible_backend must use go_present when qualifying Go evidence exists"
+            )
+        if not qualifying_domain:
+            errors.append(
+                "logistics_flexible_backend requires qualifying SEN-DOMAIN-01 evidence"
+            )
     no_qualifying_stack = (
         target_stack == "no_qualifying_go"
-        if current_rubric
+        if (current_v9 or current_v8)
         else target_stack == "no_qualifying_go_or_nodejs"
     )
-    if (no_qualifying_stack or target_stack == "unclear") and qualifying_backend:
+    if current_v9:
+        if target_stack in {"no_qualifying_go", "unclear"} and qualifying_go:
+            errors.append(
+                "priority_profile.target_stack conflicts with qualifying SEN-BE-01 Go evidence"
+            )
+    elif (no_qualifying_stack or target_stack == "unclear") and qualifying_backend:
         errors.append(
             "priority_profile.target_stack conflicts with qualifying SEN-BE-01 evidence"
         )
     if (
-        current_rubric
+        (current_v9 or current_v8)
         and target_stack == "no_qualifying_go"
         and "U05_TRANSFERABILITY" in uncertainty_codes
     ):
@@ -364,11 +408,6 @@ def _validate_priority_profile(
             "supported refactoring_experience requires SEN-LEVEL-01 supported at E2 or above"
         )
 
-    domain = evidence.get("SEN-DOMAIN-01", {})
-    qualifying_domain = (
-        domain.get("state") == "supported"
-        and STRENGTH_RANK.get(domain.get("strength"), -1) >= STRENGTH_RANK["E2"]
-    )
     if (profile.get("logistics_experience") == "supported") != qualifying_domain:
         errors.append(
             "priority_profile.logistics_experience must match qualifying SEN-DOMAIN-01 evidence"
@@ -561,10 +600,21 @@ def _validate_recommendation(
     record: dict[str, Any], evidence: dict[str, dict[str, Any]], probe_criteria: set[str], errors: list[str]
 ) -> None:
     recommendation = record.get("model_recommendation")
-    current_v8 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
-    advance_minimums = V8_ADVANCE_MINIMUMS if current_v8 else V7_ADVANCE_MINIMUMS
-    negative_core = V8_NEGATIVE_CORE if current_v8 else V7_NEGATIVE_CORE
-    direct_critical = V8_DIRECT_CRITICAL if current_v8 else V7_DIRECT_CRITICAL
+    current_v9 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+    current_v8 = record.get("rubric_version") == V8_RUBRIC_VERSION
+    current_v8_or_v9 = current_v8 or current_v9
+    if current_v9:
+        advance_minimums = V9_ADVANCE_MINIMUMS
+        negative_core = V9_NEGATIVE_CORE
+        direct_critical = V9_DIRECT_CRITICAL
+    elif current_v8:
+        advance_minimums = V8_ADVANCE_MINIMUMS
+        negative_core = V8_NEGATIVE_CORE
+        direct_critical = V8_DIRECT_CRITICAL
+    else:
+        advance_minimums = V7_ADVANCE_MINIMUMS
+        negative_core = V7_NEGATIVE_CORE
+        direct_critical = V7_DIRECT_CRITICAL
     if recommendation == "advance_pending_human":
         for criterion, minimum in advance_minimums.items():
             item = evidence.get(criterion, {})
@@ -580,7 +630,7 @@ def _validate_recommendation(
             errors.append("missing AI evidence on an advance record requires an SEN-AI-01 interview probe")
         frontend = evidence.get("SEN-FE-01", {})
         if (
-            current_v8
+            current_v8_or_v9
             and (
                 frontend.get("state") != "supported"
                 or STRENGTH_RANK.get(frontend.get("strength"), -1)
@@ -588,14 +638,17 @@ def _validate_recommendation(
             )
             and "SEN-FE-01" not in probe_criteria
         ):
-            errors.append("v8 backend-heavy advance records require an SEN-FE-01 interview probe")
+            errors.append("v8/v9 backend-heavy advance records require an SEN-FE-01 interview probe")
         profile = record.get("priority_profile")
         if (
             record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
             and isinstance(profile, dict)
-            and profile.get("target_stack") != "go_present"
+            and profile.get("target_stack")
+            not in {"go_present", "logistics_flexible_backend"}
         ):
-            errors.append("advance_pending_human requires the current Go hard gate")
+            errors.append(
+                "advance_pending_human requires Go or the current logistics flexible backend path"
+            )
     elif recommendation == "second_review":
         summary = record.get("recruiter_summary")
         if isinstance(summary, dict) and not summary.get("critical_gaps"):
@@ -604,7 +657,10 @@ def _validate_recommendation(
         priority_profile = record.get("priority_profile")
         missing_target_stack = isinstance(priority_profile, dict) and (
             (
-                record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+                record.get("rubric_version") in {
+                    EXPECTED_RUBRIC_VERSION,
+                    V8_RUBRIC_VERSION,
+                }
                 and priority_profile.get("target_stack") == "no_qualifying_go"
             )
             or (

@@ -20,7 +20,7 @@
 - 模型输出无效、解析失败和岗位错配属于流程质量问题，应与候选人的能力判断分开统计。
 - 决策相关疑点只有在澄清后可能改变建议时才进入二审；不会改变当前方向的缺失项会由 Python 过滤。
 
-资深全栈 v8 已用同岗位 87 份简历及现有人工原因做定向校准：Go 项目证据仍是绝对硬门槛，Node.js 不能替代；岗位同时接受完整全栈和 Go 后端偏重画像。独立前端不再单项阻断，直接推进改为要求应用研发方向、Go、架构、数据和可定位个人责任均达到项目级证据。薪资、地点、到岗、沟通取消和岗位意愿与能力评分分离；只有终态而没有具体原因的记录不用于调权。
+资深全栈 v9 在 v8 校准基础上增加受限语言放宽路径：没有合格物流项目时仍要求 Go 项目证据；同时有物流/供应链项目个人交付和其他后端项目证据时，Java、Python、Node.js、PHP 等服务端语言可以进入 `logistics_flexible_backend` 路径。岗位继续接受完整全栈和后端偏重画像，独立前端不再单项阻断；直接推进仍要求应用研发方向、后端、架构、数据和可定位个人责任达到项目级证据。薪资、地点、到岗、沟通取消和岗位意愿与能力评分分离；只有终态而没有具体原因的记录不用于调权。
 
 ## 安装
 
@@ -39,6 +39,8 @@ $env:MINIMAX_API_KEY = "你的 Token Plan Key 或 API Key"
 ```powershell
 $env:MINIMAX_API_ENDPOINT = "https://api.minimax.io/v1/text/chatcompletion_v2"
 ```
+
+如果现有环境使用 API base 配置（例如 `MINIMAX_API_BASE=https://api.minimaxi.com/v1`），worker 也会自动补齐国内文本接口路径；完整的 `MINIMAX_API_ENDPOINT` 优先级更高。国内调用通常保持默认值即可。
 
 ## 使用
 
@@ -129,7 +131,7 @@ uv run --locked python -m resume_screening export --directory exports
 
 `health` 输出 worker 心跳是否仍持有、最后心跳/成功时间、当前 parser/prompt/scoring/JD/rubric、五类队列计数、24 小时成功/错误数、错误码分布、watch 跳过计数和超阈值 processing 任务。worker 使用 SQLite 租约限制同一数据库只能有一个活跃消费者；进程异常退出后租约过期，health 会报告 `stale`。
 
-默认数据库为 `var/screening-v8.sqlite3`，默认输出目录为 `outputs`。可在子命令前使用 `--database` 和 `--output` 修改：
+默认数据库为 `var/screening-v8.sqlite3`，默认输出目录为 `outputs`。数据库名称沿用历史路径，但新任务使用当前岗位合同版本。可在子命令前使用 `--database` 和 `--output` 修改：
 
 ```powershell
 uv run --locked python -m resume_screening --database D:\screening\state.sqlite3 `
@@ -186,6 +188,43 @@ uv run --locked python scripts\feishu_resume_monitor.py --watch --apply --screen
 
 只有配置的“简历文档链接、处理状态、错误信息、处理时间、源 PDF 哈希”字段全部存在且类型可写时，成功回读的文档才会触发 `base +record-batch-update`，随后使用 `base +record-get` 核验。字段缺失时仍可完成 Markdown、文档导入和本地 AI 筛选队列交接，但 Base 写回与 NEXT_ACTION 保持关闭；新增字段后需重新运行一次 dry-run。
 
+## 在线简历发布器与 MiniMax-M3 筛选
+
+如果不需要读取或写回 Base，只需把本地 PDF 发布为飞书文档并生成本地链接列表，可使用 `scripts/feishu_online_resume_publisher.py`。默认只做本地提取/OCR、清洗脱敏和 dry-run；加 `--screening` 后，`--apply` 只有在飞书文档回读非空时才会把任务交给筛选队列，发布器自身不会调用模型或发送群消息：
+
+```powershell
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply --screening
+```
+
+启用 `--screening` 时，发布器不会在“仅完成飞书回读”后展示链接；`resume-index.md` 初始只保留标题。worker 完成任务后，用与发布时相同的筛选参数再执行一次本地 dry-run 刷新索引：
+
+```powershell
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening
+```
+
+索引默认只展示当前岗位合同下 `score >= 70` 且 Python 生成的 `review_status=advance_pending_human` 的候选人；二审、人工复核、低于阈值或主栈路径未通过者不会进入列表。v9 中，物流背景放宽路径的非 Go 后端候选人只有在 `SEN-BE-01` 和 `SEN-DOMAIN-01` 都达到项目级 `E2` 且其余核心门槛满足时，才会进入该推进列表。阈值可用 `--screening-min-score 80` 或环境变量 `FEISHU_SCREENING_MIN_SCORE` 调整；它只是待人工确认的候选人展示门槛，不是最终录用决定。
+
+如需查看所有已完成且分数有效的结果（包括低于阈值或 `do_not_advance_pending_human`，仅用于人工复核，不代表推进或录用），使用 `--screening-index-mode all-scored`；也可设置环境变量 `FEISHU_SCREENING_INDEX_MODE=all-scored`。未完成和 `manual_review` 任务不会进入该列表。
+
+如需处理历史下载文件，相关命令都加上 `--all-dates`；岗位前缀变化时，所有命令都必须使用相同的 `--job-prefix`，并重新执行 dry-run。链接列表写入 `resume-index.md`，格式为纯文本：
+
+```text
+候选人文档 · 在线简历
+
+• 张三  简历：https://tenant.feishu.cn/docx/<document-token>
+```
+
+上面的 URL 仅用于展示格式，不可访问；正式列表必须直接使用 `drive +import` 成功返回并通过回读校验的 `doc_url`，不要复制 `example.feishu.cn` 或自行拼接文档 token。
+
+然后启动现有 worker 消费队列。默认模型为 `MiniMax-M3`，默认端点为中国服务商 MiniMax 开放平台 `https://api.minimaxi.com/v1/text/chatcompletion_v2`；模型只负责提取岗位证据，Python 继续按固定 rubric 确定性评分并生成 `screening.json`、`conclusion.md` 和人工复核状态：
+
+```powershell
+uv run --locked python -m resume_screening `
+  --database "var\screening-v8.sqlite3" `
+  --output "outputs" worker --watch --poll-seconds 5
+```
+
 ## 输出
 
 每位候选人的当前结果位于：
@@ -220,7 +259,7 @@ outputs/<candidate_id>/
 
 ## 评分
 
-证据强度固定换算为 `E0=0%`、`E1=40%`、`E2=75%`、`E3=100%`。资深全栈 v8 中，模型只返回事实清单，Python 生成证据等级；E3 必须同时具备项目背景、个人动作、方法或取舍、结果口径和可核验影响，缺一项最多 E2。
+证据强度固定换算为 `E0=0%`、`E1=40%`、`E2=75%`、`E3=100%`。资深全栈 v9 中，模型只返回事实清单，Python 生成证据等级；E3 必须同时具备项目背景、个人动作、方法或取舍、结果口径和可核验影响，缺一项最多 E2。
 
 - A：证据匹配分 85–100。
 - B：证据匹配分 70–84。
@@ -228,7 +267,7 @@ outputs/<candidate_id>/
 - D：证据匹配分 40–54。
 - E：证据匹配分 0–39。
 
-证据档位不覆盖岗位门禁：没有至少 `E2` 的 Go 项目级个人交付证据时，即使相邻能力分较高，资深全栈建议仍为暂不推进。Node.js 仅作补充能力，不能替代 Go；物流/供应链维度权重为 15 分。旧版 v2–v7 记录继续只读兼容，新任务使用 v8 重筛并保留版本信息。
+证据档位不覆盖岗位门禁：没有至少 `E2` 的 Go 项目级个人交付证据时，只有在同时具备至少 `E2` 的物流/供应链项目个人交付和至少 `E2` 的其他后端项目时，资深全栈建议才可走 `logistics_flexible_backend` 放宽路径；否则仍为暂不推进。物流/供应链维度权重为 15 分。旧版 v2–v8 记录继续只读兼容，新任务使用 v9 重筛并保留版本信息。
 
 ## 人工原因与校准
 

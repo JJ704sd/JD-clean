@@ -70,6 +70,34 @@ class MiniMaxClientTests(unittest.TestCase):
             "https://api.minimaxi.com/v1/text/chatcompletion_v2",
         )
 
+    def test_environment_base_builds_domestic_text_endpoint(self):
+        response = FakeHttpResponse(
+            {
+                "id": "response-1",
+                "choices": [{"message": {"content": "{}"}}],
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+            }
+        )
+        urlopen = Mock(return_value=response)
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"MINIMAX_API_BASE": "https://api.minimaxi.com/v1"},
+                clear=True,
+            ),
+            patch("urllib.request.urlopen", urlopen),
+        ):
+            MiniMaxClient(api_key="test-key").analyze(
+                system_prompt="policy", resume_text="resume"
+            )
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+        )
+
     def test_environment_can_override_endpoint_for_other_regions(self):
         response = FakeHttpResponse(
             {

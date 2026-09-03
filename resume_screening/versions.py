@@ -17,7 +17,7 @@ ROLE_VERSIONS: dict[str, tuple[str, str]] = {
     "ai-product-manager": ("ai-pm-2026-08-v2", "ai-pm-rubric-2026-08-18-v3"),
     "senior-fullstack-engineer": (
         "senior-fullstack-2026-08-14-v1",
-        "senior-fullstack-2026-09-01-v8",
+        "senior-fullstack-2026-09-03-v9",
     ),
     "fullstack-development-intern": (
         "fullstack-intern-2026-08-14-v1",
@@ -52,4 +52,3 @@ def contract_matches(
         scoring_version,
         prompt_version,
     )
-

@@ -3,12 +3,14 @@
 The publisher is intentionally narrower than the Base monitor:
 
     local PDF -> cleaned resume.feishu.md -> one drive +import -> docs readback
-    -> local Markdown link index
+    -> optional screening queue handoff -> local Markdown link index
 
-It never reads or writes Base, never enqueues screening work, and never calls a
-model.  ``--dry-run`` is the default.  An apply run makes exactly one
-``drive +import`` attempt per new source hash; an uncertain outcome is kept as
-``import_pending`` and is never replayed automatically.
+It never reads or writes Base and never calls a model.  With ``--screening``,
+read-back-complete documents are handed to the existing local screening queue;
+the separate worker owns the MiniMax call, validation, deterministic scoring,
+and human-review routing.  ``--dry-run`` is the default.  An apply run makes
+exactly one ``drive +import`` attempt per new source hash; an uncertain outcome
+is kept as ``import_pending`` and is never replayed automatically.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import sqlite3
 import sys
 import time
 from collections import Counter
@@ -47,9 +50,17 @@ from resume_screening.feishu_monitor import (
     safe_name,
     sha256,
 )
+from resume_screening.feishu_screening import (
+    DEFAULT_SCREENING_MODEL,
+    DEFAULT_SCREENING_ROLE,
+    ScreeningHandoffError,
+    ScreeningQueueBridge,
+)
+from resume_screening.queue import TaskStore
+from resume_screening.versions import ROLE_VERSIONS, contract_matches
 
 
-SCRIPT_VERSION = "feishu-online-resume-publisher-v1"
+SCRIPT_VERSION = "feishu-online-resume-publisher-v3"
 STATE_VERSION = 1
 DEFAULT_JOB_PREFIX = "全栈工程师_深圳 15-25K"
 DEFAULT_SOURCE_DIRECTORY = Path.home() / "Downloads"
@@ -58,6 +69,11 @@ DEFAULT_STATE_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "
 DEFAULT_REPORT_PATH = DEFAULT_OUTPUT_DIRECTORY / "online-publish-report.json"
 DEFAULT_HISTORY_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "history.jsonl"
 DEFAULT_INDEX_NAME = "resume-index.md"
+DEFAULT_SCREENING_DATABASE = PROJECT_ROOT / "var" / "screening-v8.sqlite3"
+DEFAULT_SCREENING_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs"
+DEFAULT_SCREENING_MIN_SCORE = 70
+SCREENING_INDEX_MODES = ("shortlist", "all-scored")
+DEFAULT_SCREENING_INDEX_MODE = "shortlist"
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,13 @@ class PublisherConfig:
     interval_seconds: int = 300
     task_timeout_seconds: int = 180
     task_poll_seconds: float = 2.0
+    screening_enabled: bool = False
+    screening_database: Path = DEFAULT_SCREENING_DATABASE
+    screening_output_directory: Path = DEFAULT_SCREENING_OUTPUT_DIRECTORY
+    screening_role: str = DEFAULT_SCREENING_ROLE
+    screening_model: str = DEFAULT_SCREENING_MODEL
+    screening_min_score: int = DEFAULT_SCREENING_MIN_SCORE
+    screening_index_mode: str = DEFAULT_SCREENING_INDEX_MODE
 
 
 def _resolved(path: Path) -> Path:
@@ -184,6 +207,13 @@ def _config_fingerprint(config: PublisherConfig) -> str:
         "job_prefix": config.job_prefix,
         "today_only": config.today_only,
         "index_path": str(config.index_path),
+        "screening_enabled": config.screening_enabled,
+        "screening_database": str(config.screening_database),
+        "screening_output_directory": str(config.screening_output_directory),
+        "screening_role": config.screening_role,
+        "screening_model": config.screening_model,
+        "screening_min_score": config.screening_min_score,
+        "screening_index_mode": config.screening_index_mode,
     }
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -356,6 +386,7 @@ def _entry_for_item(item: dict[str, Any], *, status: str, result: dict[str, Any]
         "import_outcome_uncertain": bool(
             result.get("import_outcome_uncertain", item.get("import_outcome_uncertain", False))
         ),
+        "screening": result.get("screening") or item.get("screening"),
         "error": result.get("error") or item.get("error"),
         "updated_at": now_utc(),
     }
@@ -374,6 +405,7 @@ def _item_from_entry(item: dict[str, Any], entry: dict[str, Any], reason: str) -
                 "readback_nonempty",
                 "readback_chars",
                 "import_outcome_uncertain",
+                "screening",
             )
             if entry.get(key) is not None
         }
@@ -387,21 +419,85 @@ def _markdown_cell(value: Any) -> str:
 
 
 def _write_index(path: Path, rows: list[tuple[str, str]], *, dry_run: bool) -> None:
-    lines = [
-        "# 全栈工程师清洗后在线简历",
-        "",
-        "| 候选人文档 | 在线简历 |",
-        "| ----- | ----- |",
-    ]
+    lines = ["候选人文档 · 在线简历"]
     if rows:
-        lines.extend(
-            f"| {_markdown_cell(name)} | [打开简历]({url}) |" for name, url in rows
-        )
-    elif dry_run:
-        lines.append("| 暂无 | dry-run 未执行飞书导入 |")
-    else:
-        lines.append("| 暂无 | 没有完成正文回读的在线文档 |")
+        lines.append("")
+        lines.extend(f"• {_markdown_cell(name)}  简历：{url}" for name, url in rows)
     _atomic_write(path, "\n".join(lines) + "\n")
+
+
+def _valid_screening_score(scorecard: Any) -> int | None:
+    if not isinstance(scorecard, dict):
+        return None
+    value = scorecard.get("score")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        score = value
+    elif isinstance(value, float) and value.is_integer():
+        score = int(value)
+    else:
+        return None
+    return score if 0 <= score <= 100 else None
+
+
+def _screened_index_rows(
+    config: PublisherConfig,
+    published_items: dict[str, dict[str, Any]],
+) -> tuple[list[tuple[str, str]], str | None]:
+    """Return current documents with a completed, valid score.
+
+    The publisher owns the Feishu URL, while the worker owns the score.  Join
+    those two local records by source hash; never infer a document URL from a
+    candidate ID or treat a queued/manual-review task as a passing result.
+    """
+
+    if not published_items or not config.screening_database.is_file():
+        return [], None
+    try:
+        results = TaskStore(config.screening_database).successful_results()
+    except (OSError, sqlite3.Error, TypeError, ValueError) as error:
+        return [], _diagnostic(error)
+
+    qualified_hashes: set[str] = set()
+    for task, envelope in results:
+        if task.source_sha256 not in published_items:
+            continue
+        if task.model != config.screening_model:
+            continue
+        if not contract_matches(
+            role=task.role,
+            jd_version=task.jd_version,
+            rubric_version=task.rubric_version,
+            parser_version=task.parser_version,
+            scoring_version=task.scoring_version,
+            prompt_version=task.prompt_version,
+        ):
+            continue
+        scorecard = envelope.get("scorecard") if isinstance(envelope, dict) else None
+        score = _valid_screening_score(scorecard)
+        if score is None:
+            continue
+        if config.screening_index_mode == "shortlist":
+            if score < config.screening_min_score:
+                continue
+            # A high evidence score must not bypass the role-owned hard gate or
+            # a required second review.  The default index is a shortlist, not
+            # a final hire decision, so only the Python-derived positive
+            # recommendation enters.
+            if scorecard.get("review_status") != "advance_pending_human":
+                continue
+        qualified_hashes.add(task.source_sha256)
+
+    rows: list[tuple[str, str]] = []
+    for source_hash, item in published_items.items():
+        if source_hash not in qualified_hashes:
+            continue
+        name = item.get("candidate_name")
+        url = item.get("doc_url")
+        if isinstance(name, str) and isinstance(url, str) and name.strip() and url.strip():
+            rows.append((name, url))
+    return rows, None
 
 
 def _base_item(path: Path, candidate_name: str) -> dict[str, Any]:
@@ -419,6 +515,7 @@ def _base_item(path: Path, candidate_name: str) -> dict[str, Any]:
         "readback_nonempty": None,
         "readback_chars": None,
         "import_outcome_uncertain": False,
+        "screening": None,
         "error": None,
     }
 
@@ -434,6 +531,16 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
         "source_directory": str(config.source_directory),
         "today_only": config.today_only,
         "job_prefix": config.job_prefix,
+        "screening": {
+            "enabled": config.screening_enabled,
+            "database": str(config.screening_database),
+            "output_directory": str(config.screening_output_directory),
+            "role": config.screening_role,
+            "model": config.screening_model,
+            "min_score": config.screening_min_score,
+            "index_mode": config.screening_index_mode,
+            "index_qualified": 0,
+        },
         "preflight": {"ok": False, "external_system": "not consulted"},
         "items": [],
         "summary": {},
@@ -442,6 +549,7 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
         "document_readbacks": 0,
         "base_writebacks": 0,
         "screening_queue_handoffs": 0,
+        "screening_queue_failures": 0,
         "model_calls": 0,
         "manual_confirmation_required": False,
         "index_path": str(config.index_path),
@@ -451,6 +559,47 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
     }
 
 
+def _screening_handoff(
+    config: PublisherConfig,
+    item: dict[str, Any],
+    bridge: ScreeningQueueBridge | None,
+) -> tuple[dict[str, Any], ScreeningQueueBridge | None]:
+    if not config.screening_enabled:
+        return {"status": "disabled", "error": "screening handoff is disabled"}, bridge
+    if config.dry_run:
+        return {
+            "status": "blocked",
+            "error_code": "DRY_RUN",
+            "error": "dry-run does not enqueue AI screening tasks",
+        }, bridge
+    try:
+        if bridge is None:
+            bridge = ScreeningQueueBridge(
+                database=config.screening_database,
+                output_directory=config.screening_output_directory,
+                role=config.screening_role,
+                model=config.screening_model,
+            )
+        return (
+            bridge.enqueue_after_readback(
+                source_path=str(item["source_file"]),
+                source_sha256=str(item["source_sha256"]),
+                candidate_id=str(item["candidate_id"]),
+                candidate_name=item.get("candidate_name"),
+                document_url=item.get("doc_url"),
+                readback_nonempty=item.get("readback_nonempty"),
+                readback_chars=item.get("readback_chars"),
+            ),
+            bridge,
+        )
+    except ScreeningHandoffError as error:
+        return {
+            "status": "failed",
+            "error_code": "AI_ACTION_FAILED",
+            "error": _diagnostic(error),
+        }, bridge
+
+
 def _save_report_and_history(config: PublisherConfig, report: dict[str, Any]) -> None:
     _write_json(config.report_path, report)
     history_line = {
@@ -458,6 +607,8 @@ def _save_report_and_history(config: PublisherConfig, report: dict[str, Any]) ->
         "cycle_status": report["cycle_status"],
         "dry_run": report["dry_run"],
         "summary": report["summary"],
+        "screening_queue_handoffs": report["screening_queue_handoffs"],
+        "screening_queue_failures": report["screening_queue_failures"],
         "manual_confirmation_required": report["manual_confirmation_required"],
     }
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -501,7 +652,25 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
     }
     counts = Counter()
     rows: list[tuple[str, str]] = []
+    published_items: dict[str, dict[str, Any]] = {}
     importer = importer or (OnlineFeishuImporter(config) if not config.dry_run else None)
+    screening_bridge: ScreeningQueueBridge | None = None
+
+    def record_screening_handoff(item: dict[str, Any]) -> None:
+        nonlocal screening_bridge
+        if not config.screening_enabled:
+            return
+        screening, screening_bridge = _screening_handoff(
+            config,
+            item,
+            screening_bridge,
+        )
+        item["screening"] = screening
+        screening_status = screening.get("status")
+        if screening_status not in {"disabled", "blocked", "failed"}:
+            report["screening_queue_handoffs"] += 1
+        elif screening_status == "failed":
+            report["screening_queue_failures"] += 1
 
     for path in relevant_files:
         candidate_name = pdf_key(path, config.job_prefix)
@@ -525,6 +694,9 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
                     item = _item_from_entry(item, previous, "existing online document retained")
                     item["status"] = "already_published"
                     rows.append((candidate_name, str(item["doc_url"])))
+                    published_items[source_hash] = item
+                    record_screening_handoff(item)
+                    state["entries"][source_hash] = _entry_for_item(item, status="success")
                     counts[item["status"]] += 1
                     report["items"].append(item)
                     continue
@@ -568,6 +740,7 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
             if config.dry_run:
                 item["status"] = "prepared"
                 item["error"] = "dry-run: Feishu import not executed"
+                record_screening_handoff(item)
                 state["entries"][source_hash] = _entry_for_item(item, status="prepared")
                 counts[item["status"]] += 1
                 report["items"].append(item)
@@ -597,6 +770,9 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
                 report["document_readbacks"] += 1
                 report["external_writes"] = True
                 rows.append((candidate_name, str(item["doc_url"])))
+                published_items[source_hash] = item
+                record_screening_handoff(item)
+                state["entries"][source_hash] = _entry_for_item(item, status="success")
             if item["status"] == "import_pending":
                 report["manual_confirmation_required"] = True
             counts[item["status"]] += 1
@@ -611,6 +787,11 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
     if config.dry_run:
         state["last_dry_run_fingerprint"] = fingerprint
     _write_json(config.state_path, state)
+    if config.screening_enabled:
+        rows, index_error = _screened_index_rows(config, published_items)
+        report["screening"]["index_qualified"] = len(rows)
+        if index_error:
+            report["screening"]["index_error"] = index_error
     _write_index(config.index_path, rows, dry_run=config.dry_run)
     report["summary"] = {
         "pdf_total": len(pdf_files),
@@ -632,7 +813,20 @@ def _parser() -> argparse.ArgumentParser:
     run_mode = parser.add_mutually_exclusive_group()
     run_mode.add_argument("--dry-run", dest="dry_run", action="store_true", help="clean locally; do not import")
     run_mode.add_argument("--apply", dest="dry_run", action="store_false", help="import to Feishu after a dry-run gate")
-    parser.set_defaults(dry_run=True, today_only=True)
+    screening_mode = parser.add_mutually_exclusive_group()
+    screening_mode.add_argument(
+        "--screening",
+        dest="screening_enabled",
+        action="store_true",
+        help="enqueue read-back-complete documents for MiniMax-M3 screening",
+    )
+    screening_mode.add_argument(
+        "--no-screening",
+        dest="screening_enabled",
+        action="store_false",
+        help="do not enqueue documents for AI screening (default)",
+    )
+    parser.set_defaults(dry_run=True, today_only=True, screening_enabled=False)
     date_mode = parser.add_mutually_exclusive_group()
     date_mode.add_argument("--today-only", dest="today_only", action="store_true")
     date_mode.add_argument("--all-dates", dest="today_only", action="store_false")
@@ -648,6 +842,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval-seconds", type=int, default=300)
     parser.add_argument("--task-timeout-seconds", type=int, default=180)
     parser.add_argument("--task-poll-seconds", type=float, default=2.0)
+    parser.add_argument("--screening-database", type=Path, default=None)
+    parser.add_argument("--screening-output", type=Path, default=None)
+    parser.add_argument("--screening-role", choices=sorted(ROLE_VERSIONS), default=None)
+    parser.add_argument("--screening-model", default=None)
+    parser.add_argument(
+        "--screening-min-score",
+        type=int,
+        default=None,
+        help="only show scored resumes at or above this score (0-100)",
+    )
+    parser.add_argument(
+        "--screening-index-mode",
+        choices=SCREENING_INDEX_MODES,
+        default=None,
+        help="shortlist only, or all completed scored resumes for review",
+    )
     return parser
 
 
@@ -658,6 +868,58 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
     output = _resolved(args.output_dir)
     index = _resolved(args.index_file) if args.index_file is not None else output / DEFAULT_INDEX_NAME
     folder_token = args.folder_token or os.environ.get("FEISHU_DOC_FOLDER_TOKEN", "").strip() or None
+    screening_database = _resolved(
+        Path(
+            args.screening_database
+            or os.environ.get("FEISHU_SCREENING_DATABASE", "").strip()
+            or DEFAULT_SCREENING_DATABASE
+        )
+    )
+    screening_output_directory = _resolved(
+        Path(
+            args.screening_output
+            or os.environ.get("FEISHU_SCREENING_OUTPUT_DIR", "").strip()
+            or DEFAULT_SCREENING_OUTPUT_DIRECTORY
+        )
+    )
+    screening_role = (
+        args.screening_role
+        or os.environ.get("FEISHU_SCREENING_ROLE", "").strip()
+        or DEFAULT_SCREENING_ROLE
+    )
+    screening_model = (
+        args.screening_model
+        or os.environ.get("FEISHU_SCREENING_MODEL", "").strip()
+        or DEFAULT_SCREENING_MODEL
+    )
+    configured_min_score = args.screening_min_score
+    if configured_min_score is None:
+        raw_min_score = os.environ.get("FEISHU_SCREENING_MIN_SCORE", "").strip()
+        if raw_min_score:
+            try:
+                configured_min_score = int(raw_min_score)
+            except ValueError as error:
+                raise ValueError(
+                    "screening minimum score must be an integer from 0 to 100"
+                ) from error
+        else:
+            configured_min_score = DEFAULT_SCREENING_MIN_SCORE
+    if not 0 <= configured_min_score <= 100:
+        raise ValueError("screening minimum score must be from 0 to 100")
+    screening_index_mode = (
+        args.screening_index_mode
+        or os.environ.get("FEISHU_SCREENING_INDEX_MODE", "").strip()
+        or DEFAULT_SCREENING_INDEX_MODE
+    )
+    if screening_index_mode not in SCREENING_INDEX_MODES:
+        raise ValueError(
+            "screening index mode must be one of: "
+            + ", ".join(SCREENING_INDEX_MODES)
+        )
+    if args.screening_enabled and screening_role not in ROLE_VERSIONS:
+        raise ValueError(f"unsupported screening role: {screening_role!r}")
+    if args.screening_enabled and not screening_model.strip():
+        raise ValueError("screening model cannot be empty")
     return PublisherConfig(
         source_directory=_resolved(source),
         output_directory=output,
@@ -674,6 +936,13 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
         interval_seconds=args.interval_seconds,
         task_timeout_seconds=args.task_timeout_seconds,
         task_poll_seconds=args.task_poll_seconds,
+        screening_enabled=bool(args.screening_enabled),
+        screening_database=screening_database,
+        screening_output_directory=screening_output_directory,
+        screening_role=screening_role,
+        screening_model=screening_model,
+        screening_min_score=configured_min_score,
+        screening_index_mode=screening_index_mode,
     )
 
 
@@ -691,6 +960,7 @@ def _print_summary(report: dict[str, Any]) -> None:
                 "document_readbacks": report["document_readbacks"],
                 "base_writebacks": report["base_writebacks"],
                 "screening_queue_handoffs": report["screening_queue_handoffs"],
+                "screening_queue_failures": report["screening_queue_failures"],
                 "model_calls": report["model_calls"],
                 "index_path": report["index_path"],
                 "report_path": report["report_path"],

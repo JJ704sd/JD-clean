@@ -10,7 +10,7 @@
   "candidate_name": "张三",
   "role": "senior-fullstack-engineer",
   "jd_version": "senior-fullstack-2026-08-14-v1",
-  "rubric_version": "senior-fullstack-2026-09-01-v8",
+  "rubric_version": "senior-fullstack-2026-09-03-v9",
   "screening_status": "non_final",
   "model_recommendation": "second_review",
   "recommendation_rationale": "后端、前端与生产影响证据较强，但 BFF 架构决策是否由候选人负责会改变推进判断。",
@@ -70,9 +70,9 @@
 
 ## 关键约束
 
-- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-09-01-v8`。新校验器继续读取 `1.2 + v7/v6/v5/v4/v3` 和 `1.1 + v2`，但旧记录仅保留审计语义；受 v8 岗位轨道和门槛变化影响的旧记录必须重筛，不能原地改写。
-- v8 的 `priority_profile` 为必填对象：`target_stack` 只允许 `go_present`、`no_qualifying_go`、`unclear`；重构和物流字段只允许 `supported`、`not_evidenced`、`unclear`。`go_present` 必须有 `SEN-BE-01 >= E2` 的 Go 项目证据，物流状态必须与 `SEN-DOMAIN-01` 一致，重构 `supported` 必须回指 `SEN-LEVEL-01 >= E2` 的可定位重构证据。`SEN-FE-01` 不再是直接推进硬门槛。
-- 模型的新写入负载不包含 `strength`，而是为每项提供五字段事实清单；Python 生成最终记录中的 `E0`–`E3`。应用层随后生成独立 `scorecard`，使用 `scoring_version: evidence-score-2026-09-01-v2`；`grade` 只按证据分区间生成，`review_status` 单独保存建议/复核状态。Go 硬门槛继续决定是否建议推进，不能被分数抵消。
+- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-09-03-v9`。新校验器继续读取 `1.2 + v8/v7/v6/v5/v4/v3` 和 `1.1 + v2`，但旧记录仅保留审计语义；受 v9 主栈放宽规则影响的旧记录必须重筛，不能原地改写。
+- v9 的 `priority_profile` 为必填对象：`target_stack` 只允许 `go_present`、`logistics_flexible_backend`、`no_qualifying_go`、`unclear`；重构和物流字段只允许 `supported`、`not_evidenced`、`unclear`。`go_present` 必须有 `SEN-BE-01 >= E2` 的 Go 项目证据；`logistics_flexible_backend` 必须同时有 `SEN-BE-01 >= E2` 的非 Go 后端项目证据和 `SEN-DOMAIN-01 >= E2` 的物流/供应链个人项目证据。物流状态必须与 `SEN-DOMAIN-01` 一致，重构 `supported` 必须回指 `SEN-LEVEL-01 >= E2` 的可定位重构证据。`SEN-FE-01` 不再是直接推进硬门槛。
+- 模型的新写入负载不包含 `strength`，而是为每项提供五字段事实清单；Python 生成最终记录中的 `E0`–`E3`。应用层随后生成独立 `scorecard`，使用 `scoring_version: evidence-score-2026-09-01-v2`；`grade` 只按证据分区间生成，`review_status` 单独保存建议/复核状态。v9 中 Go 只对无物流放宽条件的记录构成主栈门禁，不能用分数替代物流和后端项目证据。
 - `candidate_name` 是可选展示字段，只能转录简历明确给出的姓名，不得猜测或从邮箱推断；缺失时省略。姓名不参与证据与建议，`candidate_id` 仍是稳定审计主键。
 - 模型初筛始终为 `non_final`，不得伪造已完成的人审字段。
 - Schema 1.2 的人工终态必须记录带时区的 `level_1_reviewed_at`；需要二审时还必须记录 `level_2_reviewed_at`，且二审时间严格晚于一审。待审核状态的时间字段保持 `null`。

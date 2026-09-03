@@ -34,10 +34,13 @@ V8_ADVANCE_MINIMUMS = {
     "SEN-LEVEL-01": "E2",
     "SEN-ADM-01": "E1",
 }
+V9_ADVANCE_MINIMUMS = V8_ADVANCE_MINIMUMS
 V7_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-FE-01", "SEN-DATA-01"}
 V8_NEGATIVE_CORE = {"SEN-BE-01", "SEN-ARCH-01", "SEN-DATA-01", "SEN-LEVEL-01"}
+V9_NEGATIVE_CORE = V8_NEGATIVE_CORE
 V7_DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
 V8_DIRECT_CRITICAL = {"SEN-BE-01"}
+V9_DIRECT_CRITICAL = V8_DIRECT_CRITICAL
 UNCERTAINTY_CODES = {
     "U01_PARSE_QUALITY",
     "U02_MUST_HAVE_MISSING",
@@ -83,10 +86,30 @@ E3_FACTOR_FIELDS = (
     "result_scope",
     "verifiable_impact",
 )
+MISSING_FACT_MARKERS = {
+    "",
+    "null",
+    "none",
+    "n/a",
+    "na",
+    "unknown",
+    "not provided",
+    "not mentioned",
+    "not specified",
+    "no evidence",
+    "未提供",
+    "未提及",
+    "未说明",
+    "未写明",
+    "无",
+    "无相关信息",
+    "无明确证据",
+    "无法确认",
+}
 
 PROBE_TEXT = {
     "SEN-EXP-01": "请核实研发年限、全栈职责范围及对应项目时间。",
-    "SEN-BE-01": "请说明 Go 项目中的个人职责、生产环境动作和交付结果。",
+    "SEN-BE-01": "请说明后端项目中的个人职责、生产环境动作和交付结果；若有物流背景，可使用 Go 以外的服务端语言。",
     "SEN-ARCH-01": "请说明架构方案中的个人决策、约束、备选方案和结果。",
     "SEN-FE-01": "请说明独立负责的前端模块、技术方案和上线结果。",
     "SEN-DATA-01": "请说明数据建模、数据库或缓存方面的个人工程动作。",
@@ -389,6 +412,24 @@ def _supported(item: dict[str, Any], minimum: str) -> bool:
 
 
 def _derive_v4_senior_evidence(value: list[Any]) -> list[dict[str, Any]]:
+    def has_fact(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        normalized = " ".join(value.split()).strip().strip("。；;，,、:：")
+        folded = normalized.casefold()
+        return bool(normalized) and folded not in MISSING_FACT_MARKERS and not folded.startswith(
+            (
+                "未提供",
+                "未提及",
+                "未说明",
+                "未写明",
+                "无法确认",
+                "not provided",
+                "not mentioned",
+                "not specified",
+            )
+        )
+
     evidence: list[dict[str, Any]] = []
     for raw in value:
         if not isinstance(raw, dict):
@@ -397,8 +438,7 @@ def _derive_v4_senior_evidence(value: list[Any]) -> list[dict[str, Any]]:
         factors = item.pop("evidence_factors", None)
         factor_map = factors if isinstance(factors, dict) else {}
         present = {
-            field: isinstance(factor_map.get(field), str)
-            and bool(factor_map[field].strip())
+            field: has_fact(factor_map.get(field))
             for field in E3_FACTOR_FIELDS
         }
         state = item.get("state")
@@ -595,16 +635,28 @@ def assemble_senior_record(
         in {
             "senior-fullstack-2026-09-01-v7",
             "senior-fullstack-2026-09-01-v8",
+            "senior-fullstack-2026-09-03-v9",
         }
         else evidence_value
     )
     by_criterion = {
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
+    current_v9 = rubric_version == "senior-fullstack-2026-09-03-v9"
     current_v8 = rubric_version == "senior-fullstack-2026-09-01-v8"
-    advance_minimums = V8_ADVANCE_MINIMUMS if current_v8 else V7_ADVANCE_MINIMUMS
-    negative_core = V8_NEGATIVE_CORE if current_v8 else V7_NEGATIVE_CORE
-    direct_critical = V8_DIRECT_CRITICAL if current_v8 else V7_DIRECT_CRITICAL
+    current_v8_or_v9 = current_v8 or current_v9
+    if current_v9:
+        advance_minimums = V9_ADVANCE_MINIMUMS
+        negative_core = V9_NEGATIVE_CORE
+        direct_critical = V9_DIRECT_CRITICAL
+    elif current_v8:
+        advance_minimums = V8_ADVANCE_MINIMUMS
+        negative_core = V8_NEGATIVE_CORE
+        direct_critical = V8_DIRECT_CRITICAL
+    else:
+        advance_minimums = V7_ADVANCE_MINIMUMS
+        negative_core = V7_NEGATIVE_CORE
+        direct_critical = V7_DIRECT_CRITICAL
     uncertainties = _normalize_uncertainties(payload.get("uncertainties"))
     incoming_codes = {item["code"] for item in uncertainties}
     uncertainties = [
@@ -650,21 +702,35 @@ def assemble_senior_record(
         )
 
     backend = by_criterion.get("SEN-BE-01", {})
-    qualifying_go = _supported(backend, "E2") and bool(
+    level = by_criterion.get("SEN-LEVEL-01", {})
+    domain = by_criterion.get("SEN-DOMAIN-01", {})
+    qualifying_backend = _supported(backend, "E2")
+    qualifying_go = qualifying_backend and bool(
         GO_PATTERN.search(str(backend.get("excerpt") or ""))
     )
+    qualifying_logistics = _supported(domain, "E2")
     backend_text = " ".join(
         str(backend.get(field) or "") for field in ("excerpt", "rationale")
     )
     contribution_unclear = "U04_CONTRIBUTION_UNCLEAR" in incoming_codes
-    if backend.get("state") == "conflicting" or (
-        GO_PATTERN.search(backend_text)
-        and not qualifying_go
-        and (contribution_unclear or backend.get("confidence") == "low")
+    logistics_exception_unclear = current_v9 and (
+        domain.get("state") == "conflicting"
+        or (qualifying_logistics and domain.get("confidence") == "low")
+    )
+    if (
+        backend.get("state") == "conflicting"
+        or (not qualifying_go and logistics_exception_unclear)
+        or (
+            GO_PATTERN.search(backend_text)
+            and not qualifying_go
+            and (contribution_unclear or backend.get("confidence") == "low")
+        )
     ):
         target_stack = "unclear"
     elif qualifying_go:
         target_stack = "go_present"
+    elif current_v9 and qualifying_backend and qualifying_logistics:
+        target_stack = "logistics_flexible_backend"
     else:
         target_stack = "no_qualifying_go"
         uncertainties = [
@@ -698,8 +764,6 @@ def assemble_senior_record(
             )
         ]
 
-    level = by_criterion.get("SEN-LEVEL-01", {})
-    domain = by_criterion.get("SEN-DOMAIN-01", {})
     priority_profile = {
         "target_stack": target_stack,
         "refactoring_experience": (
@@ -722,6 +786,11 @@ def assemble_senior_record(
     }
 
     decision_ids = set(advance_minimums) | negative_core
+    if current_v9 and target_stack in {
+        "logistics_flexible_backend",
+        "unclear",
+    }:
+        decision_ids.add("SEN-DOMAIN-01")
     if any(
         by_criterion.get(criterion, {}).get("confidence") == "low"
         for criterion in decision_ids
@@ -737,6 +806,17 @@ def assemble_senior_record(
         )
 
     probes = _normalize_probes(payload.get("interview_probes"), by_criterion)
+    if target_stack == "unclear" and not uncertainties:
+        _add_uncertainty(
+            uncertainties,
+            _uncertainty(
+                "U06_BOUNDARY_CASE",
+                "后端主栈或物流例外资格存在边界",
+                "确认物流背景和后端个人交付后，可能改变主栈处置",
+                "由责任人独立回看后端与物流项目原文",
+            ),
+        )
+
     if uncertainties:
         recommendation = "second_review"
     elif target_stack == "no_qualifying_go":
@@ -780,7 +860,7 @@ def assemble_senior_record(
     ):
         _ensure_probe(probes, "SEN-AI-01")
     if (
-        current_v8
+        current_v8_or_v9
         and recommendation == "advance_pending_human"
         and not _supported(by_criterion.get("SEN-FE-01", {}), "E2")
     ):
@@ -818,10 +898,16 @@ def assemble_senior_record(
         rationale = "存在决策相关不确定性，需按原因码完成人工二审后再决定。"
         next_action = "回看原始简历并按原因码完成二审。"
     elif recommendation == "advance_pending_human":
-        rationale = "Go 硬门槛及资深全栈核心证据达到推进标准，结论待人工一审核验。"
+        if target_stack == "logistics_flexible_backend":
+            rationale = "物流背景与非 Go 后端项目证据满足放宽路径，资深全栈核心证据达到推进标准，结论待人工一审核验。"
+        else:
+            rationale = "Go 硬门槛及资深全栈核心证据达到推进标准，结论待人工一审核验。"
         next_action = "由招聘责任人核对原文位置和证据强度并完成人工一审。"
     else:
-        rationale = "Go 硬门槛或核心证据未达到岗位要求，结论待人工一审核验。"
+        if target_stack == "no_qualifying_go":
+            rationale = "Go 硬门槛或核心证据未达到岗位要求，且未命中物流背景放宽路径，结论待人工一审核验。"
+        else:
+            rationale = "核心证据未达到岗位要求，结论待人工一审核验。"
         next_action = "由招聘责任人核对硬门槛和关键缺口并完成人工一审。"
 
     record: dict[str, Any] = {

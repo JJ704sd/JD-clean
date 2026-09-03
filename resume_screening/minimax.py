@@ -11,8 +11,27 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-DEFAULT_ENDPOINT = "https://api.minimaxi.com/v1/text/chatcompletion_v2"
+DEFAULT_API_BASE = "https://api.minimaxi.com/v1"
+TEXT_COMPLETION_PATH = "/text/chatcompletion_v2"
+DEFAULT_ENDPOINT = f"{DEFAULT_API_BASE}{TEXT_COMPLETION_PATH}"
 RETRYABLE_BUSINESS_CODES = {1000, 1001, 1002, 1013, 1024, 1033, 1041}
+
+
+def _configured_endpoint(explicit: str | None = None) -> str:
+    """Resolve a full endpoint while accepting the common base URL setting."""
+
+    if explicit and explicit.strip():
+        return explicit.strip()
+    endpoint = os.environ.get("MINIMAX_API_ENDPOINT", "").strip()
+    if endpoint:
+        return endpoint
+    base = os.environ.get("MINIMAX_API_BASE", "").strip()
+    if base:
+        base = base.rstrip("/")
+        if base.casefold().endswith(TEXT_COMPLETION_PATH.casefold()):
+            return base
+        return f"{base}{TEXT_COMPLETION_PATH}"
+    return DEFAULT_ENDPOINT
 
 
 class ModelCallError(RuntimeError):
@@ -51,12 +70,12 @@ class MiniMaxClient:
         timeout_seconds: float = 180,
     ):
         self.api_key = api_key or os.environ.get("MINIMAX_API_KEY")
-        self.endpoint = (
-            endpoint or os.environ.get("MINIMAX_API_ENDPOINT") or DEFAULT_ENDPOINT
-        )
+        self.endpoint = _configured_endpoint(endpoint)
         parsed_endpoint = urlsplit(self.endpoint)
         if parsed_endpoint.scheme.casefold() != "https" or not parsed_endpoint.netloc:
-            raise ValueError("MINIMAX_API_ENDPOINT must be an HTTPS URL")
+            raise ValueError(
+                "MINIMAX_API_ENDPOINT or MINIMAX_API_BASE must be an HTTPS URL"
+            )
         self.timeout_seconds = timeout_seconds
 
     def analyze(
