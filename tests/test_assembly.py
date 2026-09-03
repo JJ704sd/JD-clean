@@ -144,6 +144,162 @@ class SeniorRecordAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(validate_record(ROOT, record["role"], record), [])
 
+    def test_v9_logistics_background_allows_qualified_non_go_backend(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            state="supported",
+            strength="E2",
+            excerpt="负责 Java/Spring 跨境订单服务接口开发与上线",
+            location="项目 A",
+            rationale="有可定位的非 Go 后端项目个人交付证据",
+            confidence="high",
+        )
+        architecture = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ARCH-01"
+        )
+        architecture.update(
+            state="supported",
+            strength="E2",
+            excerpt="主导订单服务边界拆分并完成方案落地",
+            location="项目 A",
+            rationale="有个人架构决策和落地动作",
+            confidence="high",
+        )
+        domain = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-DOMAIN-01"
+        )
+        domain.update(
+            state="supported",
+            strength="E2",
+            excerpt="负责跨境订单履约和轨迹异常处理模块",
+            location="项目 A",
+            rationale="有物流履约业务项目证据",
+            confidence="high",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-03-v9",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["target_stack"],
+            "logistics_flexible_backend",
+        )
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(score_record(record).components["SEN-BE-01"], 15)
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v9_non_go_backend_without_logistics_keeps_stack_gate(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            state="supported",
+            strength="E2",
+            excerpt="负责 Java/Spring 交易服务接口开发与上线",
+            location="项目 A",
+            rationale="有可定位的非 Go 后端项目个人交付证据",
+            confidence="high",
+        )
+        architecture = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ARCH-01"
+        )
+        architecture.update(
+            state="supported",
+            strength="E2",
+            excerpt="主导交易服务边界拆分并完成方案落地",
+            location="项目 A",
+            rationale="有个人架构决策和落地动作",
+            confidence="high",
+        )
+        domain = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-DOMAIN-01"
+        )
+        domain.update(
+            state="not_evidenced",
+            strength="E0",
+            excerpt=None,
+            location=None,
+            rationale="简历未提供物流或供应链项目证据",
+            confidence="high",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-03-v9",
+        )
+
+        self.assertEqual(record["priority_profile"]["target_stack"], "no_qualifying_go")
+        self.assertEqual(record["model_recommendation"], "do_not_advance_pending_human")
+        self.assertEqual(score_record(record).components["SEN-BE-01"], 15)
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v9_low_confidence_logistics_exception_requires_second_review(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            state="supported",
+            strength="E2",
+            excerpt="负责 Java/Spring 物流订单服务接口开发",
+            location="项目 A",
+            rationale="有可定位的非 Go 后端项目个人交付证据",
+            confidence="high",
+        )
+        architecture = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ARCH-01"
+        )
+        architecture.update(
+            state="supported",
+            strength="E2",
+            excerpt="主导订单服务边界拆分并完成方案落地",
+            location="项目 A",
+            rationale="有个人架构决策和落地动作",
+            confidence="high",
+        )
+        domain = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-DOMAIN-01"
+        )
+        domain.update(
+            state="supported",
+            strength="E2",
+            excerpt="参与跨境订单履约系统建设",
+            location="项目 A",
+            rationale="物流背景存在，但个人边界仍需确认",
+            confidence="low",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-03-v9",
+        )
+
+        self.assertEqual(record["priority_profile"]["target_stack"], "unclear")
+        self.assertEqual(record["model_recommendation"], "second_review")
+        self.assertIn(
+            "U06_BOUNDARY_CASE",
+            {item["code"] for item in record["uncertainties"]},
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
     def test_prompt_v4_derives_e3_only_from_a_complete_fact_checklist(self):
         source = documented_senior_record()
         for item in source["evidence"]:
@@ -176,6 +332,34 @@ class SeniorRecordAssemblyTests(unittest.TestCase):
         self.assertEqual(derived_level["strength"], "E2")
         self.assertNotIn("evidence_factors", derived_level)
         self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_prompt_v4_does_not_treat_missing_fact_markers_as_evidence(self):
+        source = documented_senior_record()
+        for item in source["evidence"]:
+            item.pop("strength", None)
+            item["evidence_factors"] = {
+                "project_context": "简历未提供",
+                "personal_action": "未提及",
+                "method_or_tradeoff": "未说明",
+                "result_scope": "无",
+                "verifiable_impact": "未提供",
+            }
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": [],
+            },
+            prompt_version="resume-screening-prompt-2026-09-01-v4",
+            rubric_version="senior-fullstack-2026-09-01-v8",
+        )
+
+        backend = next(
+            item for item in record["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        self.assertEqual(backend["state"], "not_evidenced")
+        self.assertEqual(backend["strength"], "E1")
 
     def test_clear_go_failure_discards_non_decision_uncertainties(self):
         source = documented_senior_record()

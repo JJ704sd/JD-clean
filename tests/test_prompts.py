@@ -16,7 +16,7 @@ class PromptContractTests(unittest.TestCase):
             role="senior-fullstack-engineer",
             candidate_id="candidate-test",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-01-v8",
+            rubric_version="senior-fullstack-2026-09-03-v9",
             prompt_version=PROMPT_VERSION,
         )
 
@@ -29,6 +29,8 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("不得输出 strength", prompt)
         self.assertIn("evidence_factors", prompt)
         self.assertIn("五项事实全部具备才可为 E3", prompt)
+        self.assertIn("logistics_flexible_backend", prompt)
+        self.assertIn("非 Go 后端", prompt)
 
     def test_ai_product_manager_prompt_v3_requests_only_evidence_payload_fields(self):
         prompt = build_system_prompt(

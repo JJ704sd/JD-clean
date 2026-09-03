@@ -13,7 +13,7 @@ from typing import Any
 ROLE_LABEL = "高级全栈工程师"
 CRITERION_LABELS = {
     "SEN-EXP-01": "经验与全栈职责",
-    "SEN-BE-01": "后端主栈",
+    "SEN-BE-01": "后端工程能力",
     "SEN-ARCH-01": "BFF/微服务",
     "SEN-FE-01": "前端独立交付",
     "SEN-DATA-01": "数据与中间件",
@@ -57,6 +57,7 @@ REVIEW_MODE_LABELS = {
 }
 STACK_PRIORITY_LABELS = {
     "go_present": "Go 已满足",
+    "logistics_flexible_backend": "物流背景放宽（非 Go 后端）",
     "nodejs_only": "仅 Node.js（优先级较低）",
     "no_qualifying_go_or_nodejs": "不符合 Go/Node.js 主栈门槛",
     "no_qualifying_go": "不符合 Go 硬门槛",

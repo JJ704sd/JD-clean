@@ -28,7 +28,7 @@ ROLE_SKILL_FILES = {
             "references/conclusion-format.md",
             "references/output-contract.md",
             "references/decision-examples.md",
-            "references/calibration-notes-v8.md",
+            "references/calibration-notes-v9.md",
         ),
     ),
     "fullstack-development-intern": (

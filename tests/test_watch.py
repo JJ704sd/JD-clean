@@ -231,7 +231,7 @@ class WatchCliTests(unittest.TestCase):
             self.assertEqual(scanner.scan(), [])
             self.assertEqual(len(scanner.scan()), 1)
 
-    def test_old_contract_is_marked_stale_without_blocking_v8(self):
+    def test_old_contract_is_marked_stale_without_blocking_v9(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "resume.md"
@@ -255,7 +255,7 @@ class WatchCliTests(unittest.TestCase):
                     candidate_id="current",
                     role="senior-fullstack-engineer",
                     jd_version="senior-fullstack-2026-08-14-v1",
-                    rubric_version="senior-fullstack-2026-09-01-v8",
+                    rubric_version="senior-fullstack-2026-09-03-v9",
                 )
             )
 
@@ -336,7 +336,7 @@ class WatchCliTests(unittest.TestCase):
             )
             store.release_worker(second)
 
-    def test_v8_watch_runs_clean_assemble_score_validate_and_persist(self):
+    def test_v9_watch_runs_clean_assemble_score_validate_and_persist(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             incoming = root / "Downloads"
@@ -391,7 +391,7 @@ class WatchCliTests(unittest.TestCase):
             )
             self.assertEqual(
                 result["screening_record"]["rubric_version"],
-                "senior-fullstack-2026-09-01-v8",
+                "senior-fullstack-2026-09-03-v9",
             )
             self.assertIn("scorecard", result)
 

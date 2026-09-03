@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import sqlite3
 import sys
 import time
 from collections import Counter
@@ -55,10 +56,11 @@ from resume_screening.feishu_screening import (
     ScreeningHandoffError,
     ScreeningQueueBridge,
 )
-from resume_screening.versions import ROLE_VERSIONS
+from resume_screening.queue import TaskStore
+from resume_screening.versions import ROLE_VERSIONS, contract_matches
 
 
-SCRIPT_VERSION = "feishu-online-resume-publisher-v2"
+SCRIPT_VERSION = "feishu-online-resume-publisher-v3"
 STATE_VERSION = 1
 DEFAULT_JOB_PREFIX = "全栈工程师_深圳 15-25K"
 DEFAULT_SOURCE_DIRECTORY = Path.home() / "Downloads"
@@ -69,6 +71,9 @@ DEFAULT_HISTORY_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" /
 DEFAULT_INDEX_NAME = "resume-index.md"
 DEFAULT_SCREENING_DATABASE = PROJECT_ROOT / "var" / "screening-v8.sqlite3"
 DEFAULT_SCREENING_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs"
+DEFAULT_SCREENING_MIN_SCORE = 70
+SCREENING_INDEX_MODES = ("shortlist", "all-scored")
+DEFAULT_SCREENING_INDEX_MODE = "shortlist"
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,8 @@ class PublisherConfig:
     screening_output_directory: Path = DEFAULT_SCREENING_OUTPUT_DIRECTORY
     screening_role: str = DEFAULT_SCREENING_ROLE
     screening_model: str = DEFAULT_SCREENING_MODEL
+    screening_min_score: int = DEFAULT_SCREENING_MIN_SCORE
+    screening_index_mode: str = DEFAULT_SCREENING_INDEX_MODE
 
 
 def _resolved(path: Path) -> Path:
@@ -205,6 +212,8 @@ def _config_fingerprint(config: PublisherConfig) -> str:
         "screening_output_directory": str(config.screening_output_directory),
         "screening_role": config.screening_role,
         "screening_model": config.screening_model,
+        "screening_min_score": config.screening_min_score,
+        "screening_index_mode": config.screening_index_mode,
     }
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -417,6 +426,80 @@ def _write_index(path: Path, rows: list[tuple[str, str]], *, dry_run: bool) -> N
     _atomic_write(path, "\n".join(lines) + "\n")
 
 
+def _valid_screening_score(scorecard: Any) -> int | None:
+    if not isinstance(scorecard, dict):
+        return None
+    value = scorecard.get("score")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        score = value
+    elif isinstance(value, float) and value.is_integer():
+        score = int(value)
+    else:
+        return None
+    return score if 0 <= score <= 100 else None
+
+
+def _screened_index_rows(
+    config: PublisherConfig,
+    published_items: dict[str, dict[str, Any]],
+) -> tuple[list[tuple[str, str]], str | None]:
+    """Return current documents with a completed, valid score.
+
+    The publisher owns the Feishu URL, while the worker owns the score.  Join
+    those two local records by source hash; never infer a document URL from a
+    candidate ID or treat a queued/manual-review task as a passing result.
+    """
+
+    if not published_items or not config.screening_database.is_file():
+        return [], None
+    try:
+        results = TaskStore(config.screening_database).successful_results()
+    except (OSError, sqlite3.Error, TypeError, ValueError) as error:
+        return [], _diagnostic(error)
+
+    qualified_hashes: set[str] = set()
+    for task, envelope in results:
+        if task.source_sha256 not in published_items:
+            continue
+        if task.model != config.screening_model:
+            continue
+        if not contract_matches(
+            role=task.role,
+            jd_version=task.jd_version,
+            rubric_version=task.rubric_version,
+            parser_version=task.parser_version,
+            scoring_version=task.scoring_version,
+            prompt_version=task.prompt_version,
+        ):
+            continue
+        scorecard = envelope.get("scorecard") if isinstance(envelope, dict) else None
+        score = _valid_screening_score(scorecard)
+        if score is None:
+            continue
+        if config.screening_index_mode == "shortlist":
+            if score < config.screening_min_score:
+                continue
+            # A high evidence score must not bypass the role-owned hard gate or
+            # a required second review.  The default index is a shortlist, not
+            # a final hire decision, so only the Python-derived positive
+            # recommendation enters.
+            if scorecard.get("review_status") != "advance_pending_human":
+                continue
+        qualified_hashes.add(task.source_sha256)
+
+    rows: list[tuple[str, str]] = []
+    for source_hash, item in published_items.items():
+        if source_hash not in qualified_hashes:
+            continue
+        name = item.get("candidate_name")
+        url = item.get("doc_url")
+        if isinstance(name, str) and isinstance(url, str) and name.strip() and url.strip():
+            rows.append((name, url))
+    return rows, None
+
+
 def _base_item(path: Path, candidate_name: str) -> dict[str, Any]:
     return {
         "file_name": path.name,
@@ -454,6 +537,9 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
             "output_directory": str(config.screening_output_directory),
             "role": config.screening_role,
             "model": config.screening_model,
+            "min_score": config.screening_min_score,
+            "index_mode": config.screening_index_mode,
+            "index_qualified": 0,
         },
         "preflight": {"ok": False, "external_system": "not consulted"},
         "items": [],
@@ -566,6 +652,7 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
     }
     counts = Counter()
     rows: list[tuple[str, str]] = []
+    published_items: dict[str, dict[str, Any]] = {}
     importer = importer or (OnlineFeishuImporter(config) if not config.dry_run else None)
     screening_bridge: ScreeningQueueBridge | None = None
 
@@ -607,6 +694,7 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
                     item = _item_from_entry(item, previous, "existing online document retained")
                     item["status"] = "already_published"
                     rows.append((candidate_name, str(item["doc_url"])))
+                    published_items[source_hash] = item
                     record_screening_handoff(item)
                     state["entries"][source_hash] = _entry_for_item(item, status="success")
                     counts[item["status"]] += 1
@@ -682,6 +770,7 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
                 report["document_readbacks"] += 1
                 report["external_writes"] = True
                 rows.append((candidate_name, str(item["doc_url"])))
+                published_items[source_hash] = item
                 record_screening_handoff(item)
                 state["entries"][source_hash] = _entry_for_item(item, status="success")
             if item["status"] == "import_pending":
@@ -698,6 +787,11 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
     if config.dry_run:
         state["last_dry_run_fingerprint"] = fingerprint
     _write_json(config.state_path, state)
+    if config.screening_enabled:
+        rows, index_error = _screened_index_rows(config, published_items)
+        report["screening"]["index_qualified"] = len(rows)
+        if index_error:
+            report["screening"]["index_error"] = index_error
     _write_index(config.index_path, rows, dry_run=config.dry_run)
     report["summary"] = {
         "pdf_total": len(pdf_files),
@@ -752,6 +846,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--screening-output", type=Path, default=None)
     parser.add_argument("--screening-role", choices=sorted(ROLE_VERSIONS), default=None)
     parser.add_argument("--screening-model", default=None)
+    parser.add_argument(
+        "--screening-min-score",
+        type=int,
+        default=None,
+        help="only show scored resumes at or above this score (0-100)",
+    )
+    parser.add_argument(
+        "--screening-index-mode",
+        choices=SCREENING_INDEX_MODES,
+        default=None,
+        help="shortlist only, or all completed scored resumes for review",
+    )
     return parser
 
 
@@ -786,6 +892,30 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
         or os.environ.get("FEISHU_SCREENING_MODEL", "").strip()
         or DEFAULT_SCREENING_MODEL
     )
+    configured_min_score = args.screening_min_score
+    if configured_min_score is None:
+        raw_min_score = os.environ.get("FEISHU_SCREENING_MIN_SCORE", "").strip()
+        if raw_min_score:
+            try:
+                configured_min_score = int(raw_min_score)
+            except ValueError as error:
+                raise ValueError(
+                    "screening minimum score must be an integer from 0 to 100"
+                ) from error
+        else:
+            configured_min_score = DEFAULT_SCREENING_MIN_SCORE
+    if not 0 <= configured_min_score <= 100:
+        raise ValueError("screening minimum score must be from 0 to 100")
+    screening_index_mode = (
+        args.screening_index_mode
+        or os.environ.get("FEISHU_SCREENING_INDEX_MODE", "").strip()
+        or DEFAULT_SCREENING_INDEX_MODE
+    )
+    if screening_index_mode not in SCREENING_INDEX_MODES:
+        raise ValueError(
+            "screening index mode must be one of: "
+            + ", ".join(SCREENING_INDEX_MODES)
+        )
     if args.screening_enabled and screening_role not in ROLE_VERSIONS:
         raise ValueError(f"unsupported screening role: {screening_role!r}")
     if args.screening_enabled and not screening_model.strip():
@@ -811,6 +941,8 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
         screening_output_directory=screening_output_directory,
         screening_role=screening_role,
         screening_model=screening_model,
+        screening_min_score=configured_min_score,
+        screening_index_mode=screening_index_mode,
     )
 
 

@@ -211,7 +211,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                     3,
                 )
                 expected_first_evidence = (
-                    "- 后端主栈：" if skill_dir == SENIOR_DIR else "- 后端实现："
+                    "- 后端工程能力：" if skill_dir == SENIOR_DIR else "- 后端实现："
                 )
                 self.assertTrue(evidence_section.startswith(expected_first_evidence))
                 probe_section = output.split("面试优先验证\n\n", 1)[1].split(
@@ -308,6 +308,32 @@ class ScreeningValidatorTests(unittest.TestCase):
 
         self.assertEqual(SENIOR.validate_record(record), [])
 
+    def test_v9_logistics_flexible_backend_is_a_valid_current_target_stack(self):
+        record = make_advance(SENIOR_DIR)
+        record["priority_profile"]["target_stack"] = "logistics_flexible_backend"
+        backend = evidence_item(record, "SEN-BE-01")
+        backend["excerpt"] = "负责 Java/Spring 跨境订单服务接口开发"
+
+        self.assertEqual(SENIOR.validate_record(record), [])
+
+        missing_domain = copy.deepcopy(record)
+        set_not_evidenced(missing_domain, "SEN-DOMAIN-01")
+        missing_domain["priority_profile"]["logistics_experience"] = "not_evidenced"
+        errors = SENIOR.validate_record(missing_domain)
+        self.assertTrue(
+            any("requires qualifying SEN-DOMAIN-01" in error for error in errors),
+            errors,
+        )
+
+    def test_v9_logistics_flexible_backend_cannot_hide_qualifying_go(self):
+        record = make_advance(SENIOR_DIR)
+        record["priority_profile"]["target_stack"] = "logistics_flexible_backend"
+        errors = SENIOR.validate_record(record)
+        self.assertTrue(
+            any("must use go_present" in error for error in errors),
+            errors,
+        )
+
     def test_senior_v6_renderer_exposes_go_gate_and_preference_signals(self):
         go_record = make_advance(SENIOR_DIR)
         go_record["rubric_version"] = SENIOR.EXPECTED_RUBRIC_VERSION
@@ -331,6 +357,21 @@ class ScreeningValidatorTests(unittest.TestCase):
         node_output = SENIOR_RENDERER.render_single(node_record)
         self.assertIn("| 主栈优先级 | 仅 Node.js（优先级较低） |", node_output)
         self.assertIn("| 优先信号 | 未提供重构或物流行业项目证据 |", node_output)
+
+        flexible_record = make_advance(SENIOR_DIR)
+        flexible_record["priority_profile"]["target_stack"] = (
+            "logistics_flexible_backend"
+        )
+        flexible_record["evidence"] = [
+            (
+                dict(item, excerpt="负责 Java/Spring 跨境订单服务接口开发")
+                if item["criterion_id"] == "SEN-BE-01"
+                else item
+            )
+            for item in flexible_record["evidence"]
+        ]
+        flexible_output = SENIOR_RENDERER.render_single(flexible_record)
+        self.assertIn("| 主栈优先级 | 物流背景放宽（非 Go 后端） |", flexible_output)
 
     def test_senior_v6_priority_profile_is_required_and_evidence_linked(self):
         missing = make_advance(SENIOR_DIR)
