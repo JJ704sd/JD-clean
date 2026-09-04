@@ -1,7 +1,7 @@
 interface:
   display_name: "高级全栈简历初筛"
-  short_description: "按 Go 优先及物流背景放宽路径筛选高级全栈简历，生成可复核建议"
-  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历：无合格物流项目时应用 Go 主栈要求，有物流项目级证据时允许其他后端主栈走放宽路径，区分完整全栈与后端偏重画像，并显示个人责任、重构和物流优先信号，再输出简洁结论卡与人工复核动作。"
+  short_description: "按四项条件与两项不符合阈值筛选高级全栈简历"
+  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历，核对学历、物流经验、高含金量项目、语言转换与学习证据，并按两项不符合阈值输出可复核结论。"
 
 policy:
   allow_implicit_invocation: true

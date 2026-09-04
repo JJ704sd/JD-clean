@@ -26,7 +26,7 @@ def current_senior_record() -> dict:
     )
     assert match
     record = json.loads(match.group(1))
-    record["rubric_version"] = "senior-fullstack-2026-09-03-v9"
+    record["rubric_version"] = "senior-fullstack-2026-09-04-v10"
     record["priority_profile"]["target_stack"] = "go_present"
     for item in record["evidence"]:
         if item.get("state") == "supported":
@@ -104,7 +104,7 @@ class ScreeningPipelineTests(unittest.TestCase):
             candidate_id=candidate_id,
             role="senior-fullstack-engineer",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-03-v9",
+            rubric_version="senior-fullstack-2026-09-04-v10",
         )
 
     def test_successful_task_calls_model_once_and_writes_structured_outputs(self):

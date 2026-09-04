@@ -13,14 +13,14 @@ from typing import Any
 ROLE_LABEL = "高级全栈工程师"
 CRITERION_LABELS = {
     "SEN-EXP-01": "经验与全栈职责",
-    "SEN-BE-01": "后端工程能力",
+    "SEN-BE-01": "语言转换与学习交付",
     "SEN-ARCH-01": "BFF/微服务",
     "SEN-FE-01": "前端独立交付",
     "SEN-DATA-01": "数据与中间件",
     "SEN-AI-01": "AI 工程化",
     "SEN-DOMAIN-01": "物流领域",
-    "SEN-LEVEL-01": "重构/高级工程深度",
-    "SEN-ADM-01": "行政条件",
+    "SEN-LEVEL-01": "高含金量项目",
+    "SEN-ADM-01": "学历/专业",
 }
 EVIDENCE_PRIORITY = {
     criterion: index
@@ -61,6 +61,8 @@ STACK_PRIORITY_LABELS = {
     "nodejs_only": "仅 Node.js（优先级较低）",
     "no_qualifying_go_or_nodejs": "不符合 Go/Node.js 主栈门槛",
     "no_qualifying_go": "不符合 Go 硬门槛",
+    "language_transfer_supported": "转语言/转栈学习交付成立",
+    "language_learning_not_evidenced": "语言转换与学习证据不足",
     "unclear": "Go 门槛待确认",
 }
 
@@ -96,6 +98,19 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
     if not isinstance(profile, dict):
         return "旧版记录未分类", "旧版记录未分类"
     stack = STACK_PRIORITY_LABELS.get(profile.get("target_stack"), "主栈分类无效")
+    dimensions = profile.get("qualification_dimensions")
+    if isinstance(dimensions, dict):
+        names = {
+            "education": "学历",
+            "logistics": "物流",
+            "valuable_project": "高含金量项目",
+            "language_learning": "语言/学习",
+        }
+        states = {"met": "满足", "not_met": "不符合", "unclear": "待确认"}
+        summary = "；".join(
+            f"{names[key]}{states.get(dimensions.get(key), '无效')}" for key in names
+        )
+        return stack, f"{summary}；不符合 {profile.get('unmet_requirement_count', '?')} 项"
     signals: list[str] = []
     if profile.get("refactoring_experience") == "supported":
         signals.append("重构经验")
@@ -171,8 +186,8 @@ def render_single(
         f"| 候选人 | {name}（{candidate_id}） |",
         f"| 岗位 | {ROLE_LABEL} |",
         f"| 规则版本 | {_clean(record['rubric_version'])} |",
-        f"| 主栈优先级 | {stack_priority} |",
-        f"| 优先信号 | {priority_signals} |",
+        f"| 语言路径 | {stack_priority} |",
+        f"| 四项筛选 | {priority_signals} |",
         f"| 初筛建议（非最终） | {RECOMMENDATION_LABELS[record['model_recommendation']]} |",
         f"| 核心判断 | {_clip(record['recommendation_rationale'], 160)} |",
         f"| 人工复核 | {_review_line(record)} |",
@@ -218,7 +233,7 @@ def render_single(
                 "",
                 "## 结论汇总表",
                 "",
-                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 主栈优先级 | 优先信号 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
+                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 语言路径 | 四项筛选 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
                 "|---|---|---|---|---|---|---|---|---|",
                 "| "
                 + " | ".join(
@@ -266,7 +281,7 @@ def render_batch(
         f"- 规则版本：{_clean(first['rubric_version'])}",
         f"- 共 {len(records)} 份：建议推进 {counts['advance_pending_human']}，二审 {counts['second_review']}，暂不推进 {counts['do_not_advance_pending_human']}",
         "",
-        "| 候选人姓名 | 候选人 ID | 初筛建议 | 主栈优先级 | 优先信号 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
+        "| 候选人姓名 | 候选人 ID | 初筛建议 | 语言路径 | 四项筛选 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for record in records:

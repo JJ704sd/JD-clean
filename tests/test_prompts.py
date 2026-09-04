@@ -10,17 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PromptContractTests(unittest.TestCase):
-    def test_senior_prompt_v4_requests_facts_without_model_strength(self):
+    def test_senior_prompt_v5_requests_facts_without_model_strength(self):
         prompt = build_system_prompt(
             ROOT,
             role="senior-fullstack-engineer",
             candidate_id="candidate-test",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-03-v9",
+            rubric_version="senior-fullstack-2026-09-04-v10",
             prompt_version=PROMPT_VERSION,
         )
 
-        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-01-v4")
+        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-04-v5")
         self.assertIn("<evidence-extraction-contract>", prompt)
         self.assertIn(
             "顶层字段只能是 evidence、uncertainties、interview_probes", prompt
@@ -29,8 +29,25 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("不得输出 strength", prompt)
         self.assertIn("evidence_factors", prompt)
         self.assertIn("五项事实全部具备才可为 E3", prompt)
-        self.assertIn("logistics_flexible_backend", prompt)
-        self.assertIn("非 Go 后端", prompt)
+        self.assertIn("unmet_requirement_count", prompt)
+        self.assertIn("业务量、使用量", prompt)
+        self.assertIn("WMS", prompt)
+
+    def test_senior_prompt_requires_complete_uncertainty_fields(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-04-v10",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn(
+            "每项必须包含 code、description、decision_impact、required_human_action",
+            prompt,
+        )
+        self.assertIn("四个字段均为非空文本", prompt)
 
     def test_ai_product_manager_prompt_v3_requests_only_evidence_payload_fields(self):
         prompt = build_system_prompt(

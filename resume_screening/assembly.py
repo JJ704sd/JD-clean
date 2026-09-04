@@ -41,6 +41,12 @@ V9_NEGATIVE_CORE = V8_NEGATIVE_CORE
 V7_DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
 V8_DIRECT_CRITICAL = {"SEN-BE-01"}
 V9_DIRECT_CRITICAL = V8_DIRECT_CRITICAL
+V10_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v10"
+V10_DIMENSION_CRITERIA = {
+    "education": ("SEN-ADM-01", "E1"),
+    "logistics": ("SEN-DOMAIN-01", "E2"),
+    "valuable_project": ("SEN-LEVEL-01", "E2"),
+}
 UNCERTAINTY_CODES = {
     "U01_PARSE_QUALITY",
     "U02_MUST_HAVE_MISSING",
@@ -67,6 +73,17 @@ INDEPENDENT_REVIEW_CODES = {
     "U11_UNTRUSTED_CONTENT",
 }
 GO_PATTERN = re.compile(r"(?i)(?:\bgo\b|golang|go-zero|\bgin\b)")
+LANGUAGE_TRANSITION_PATTERN = re.compile(
+    r"转(?:语言|栈)|跨语言|技术栈迁移|语言迁移|从.{0,20}(?:转到|迁移到|切换到).{0,20}|"
+    r"migrat(?:e|ed|ion)",
+    re.IGNORECASE,
+)
+LEARNING_ACTION_PATTERN = re.compile(r"自学|快速学习|主动学习|learn(?:ed|ing)?", re.IGNORECASE)
+DELIVERY_RESULT_PATTERN = re.compile(r"上线|交付|落地|投产|生产|发布|deliver(?:ed|y)?", re.IGNORECASE)
+LANGUAGE_NEGATION_PATTERN = re.compile(
+    r"(?:未提供|未体现|未说明|没有|无).{0,16}(?:转语言|转栈|跨语言|语言迁移|技术栈迁移|学习|自学|交付)",
+    re.IGNORECASE,
+)
 REFACTOR_PATTERN = re.compile(r"重构|迁移|拆分|改造|re-?architect|refactor", re.IGNORECASE)
 ROLE_MISMATCH_PATTERN = re.compile(
     r"求职意向\s*[:：]?[^\n]{0,40}(?:AI\s*产品经理|产品经理|数据分析师|运营)",
@@ -109,13 +126,13 @@ MISSING_FACT_MARKERS = {
 
 PROBE_TEXT = {
     "SEN-EXP-01": "请核实研发年限、全栈职责范围及对应项目时间。",
-    "SEN-BE-01": "请说明后端项目中的个人职责、生产环境动作和交付结果；若有物流背景，可使用 Go 以外的服务端语言。",
+    "SEN-BE-01": "请说明目标语言项目，或一次转语言/转技术栈的学习过程、个人动作和交付结果。",
     "SEN-ARCH-01": "请说明架构方案中的个人决策、约束、备选方案和结果。",
     "SEN-FE-01": "请说明独立负责的前端模块、技术方案和上线结果。",
     "SEN-DATA-01": "请说明数据建模、数据库或缓存方面的个人工程动作。",
     "SEN-AI-01": "请说明 AI 或 RAG 工程接入、评测、降级和监控经验。",
-    "SEN-DOMAIN-01": "请说明物流业务场景、业务对象和个人交付内容。",
-    "SEN-LEVEL-01": "请说明复杂问题的诊断过程、技术取舍和可验证结果。",
+    "SEN-DOMAIN-01": "请说明 WMS、TMS/VMS、ERP、订单、履约、轨迹、计费等物流业务场景和个人交付内容。",
+    "SEN-LEVEL-01": "请说明最有价值项目的业务量、使用量、个人参与程度、业务复杂度和可验证结果。",
     "SEN-ADM-01": "请由招聘责任人核对教育背景等行政信息。",
 }
 
@@ -453,7 +470,21 @@ def _derive_v4_senior_evidence(value: list[Any]) -> list[dict[str, Any]]:
                 item["strength"] = "E1" if excerpt_present and location_present else "E0"
                 if item["strength"] == "E0":
                     item["state"] = "not_evidenced"
-            elif present["project_context"] and present["personal_action"]:
+            elif (
+                item.get("criterion_id") == "SEN-LEVEL-01"
+                and present["project_context"]
+                and present["personal_action"]
+                and any(
+                    present[field]
+                    for field in ("method_or_tradeoff", "result_scope", "verifiable_impact")
+                )
+            ):
+                item["strength"] = "E3" if all(present.values()) else "E2"
+            elif (
+                item.get("criterion_id") != "SEN-LEVEL-01"
+                and present["project_context"]
+                and present["personal_action"]
+            ):
                 item["strength"] = "E3" if all(present.values()) else "E2"
             else:
                 item["state"] = "not_evidenced"
@@ -630,22 +661,32 @@ def assemble_senior_record(
         raise TypeError("model evidence payload must contain an evidence list")
     evidence = (
         _derive_v4_senior_evidence(evidence_value)
-        if prompt_version == "resume-screening-prompt-2026-09-01-v4"
+        if prompt_version
+        in {
+            "resume-screening-prompt-2026-09-01-v4",
+            "resume-screening-prompt-2026-09-04-v5",
+        }
         and rubric_version
         in {
             "senior-fullstack-2026-09-01-v7",
             "senior-fullstack-2026-09-01-v8",
             "senior-fullstack-2026-09-03-v9",
+            V10_RUBRIC_VERSION,
         }
         else evidence_value
     )
     by_criterion = {
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
+    current_v10 = rubric_version == V10_RUBRIC_VERSION
     current_v9 = rubric_version == "senior-fullstack-2026-09-03-v9"
     current_v8 = rubric_version == "senior-fullstack-2026-09-01-v8"
     current_v8_or_v9 = current_v8 or current_v9
-    if current_v9:
+    if current_v10:
+        advance_minimums = V9_ADVANCE_MINIMUMS
+        negative_core = V9_NEGATIVE_CORE
+        direct_critical = V9_DIRECT_CRITICAL
+    elif current_v9:
         advance_minimums = V9_ADVANCE_MINIMUMS
         negative_core = V9_NEGATIVE_CORE
         direct_critical = V9_DIRECT_CRITICAL
@@ -717,7 +758,30 @@ def assemble_senior_record(
         domain.get("state") == "conflicting"
         or (qualifying_logistics and domain.get("confidence") == "low")
     )
-    if (
+    language_text = " ".join(
+        str(backend.get(field) or "") for field in ("excerpt", "rationale")
+    )
+    qualifying_transfer = (
+        qualifying_backend
+        and not LANGUAGE_NEGATION_PATTERN.search(language_text)
+        and bool(
+            LANGUAGE_TRANSITION_PATTERN.search(language_text)
+            or (
+                LEARNING_ACTION_PATTERN.search(language_text)
+                and DELIVERY_RESULT_PATTERN.search(language_text)
+            )
+        )
+    )
+    if current_v10:
+        if backend.get("state") == "conflicting" or backend.get("confidence") == "low":
+            target_stack = "unclear"
+        elif qualifying_go:
+            target_stack = "go_present"
+        elif qualifying_transfer:
+            target_stack = "language_transfer_supported"
+        else:
+            target_stack = "language_learning_not_evidenced"
+    elif (
         backend.get("state") == "conflicting"
         or (not qualifying_go and logistics_exception_unclear)
         or (
@@ -737,7 +801,7 @@ def assemble_senior_record(
             item for item in uncertainties if item["code"] != "U05_TRANSFERABILITY"
         ]
 
-    if target_stack == "no_qualifying_go":
+    if not current_v10 and target_stack == "no_qualifying_go":
         uncertainties = [
             item for item in uncertainties if item["code"] == "U11_UNTRUSTED_CONTENT"
         ]
@@ -784,8 +848,39 @@ def assemble_senior_record(
             else "not_evidenced"
         ),
     }
+    if current_v10:
+        def dimension_state(criterion: str, minimum: str) -> str:
+            item = by_criterion.get(criterion, {})
+            if item.get("state") == "conflicting" or item.get("confidence") == "low":
+                return "unclear"
+            return "met" if _supported(item, minimum) else "not_met"
 
-    decision_ids = set(advance_minimums) | negative_core
+        qualification_dimensions = {
+            name: dimension_state(criterion, minimum)
+            for name, (criterion, minimum) in V10_DIMENSION_CRITERIA.items()
+        }
+        qualification_dimensions["language_learning"] = (
+            "unclear"
+            if target_stack == "unclear"
+            else "met"
+            if target_stack in {"go_present", "language_transfer_supported"}
+            else "not_met"
+        )
+        priority_profile["valuable_project_experience"] = {
+            "met": "supported",
+            "not_met": "not_evidenced",
+            "unclear": "unclear",
+        }[qualification_dimensions["valuable_project"]]
+        priority_profile["qualification_dimensions"] = qualification_dimensions
+        priority_profile["unmet_requirement_count"] = sum(
+            state == "not_met" for state in qualification_dimensions.values()
+        )
+
+    decision_ids = (
+        {criterion for criterion, _ in V10_DIMENSION_CRITERIA.values()} | {"SEN-BE-01"}
+        if current_v10
+        else set(advance_minimums) | negative_core
+    )
     if current_v9 and target_stack in {
         "logistics_flexible_backend",
         "unclear",
@@ -811,14 +906,30 @@ def assemble_senior_record(
             uncertainties,
             _uncertainty(
                 "U06_BOUNDARY_CASE",
-                "后端主栈或物流例外资格存在边界",
-                "确认物流背景和后端个人交付后，可能改变主栈处置",
-                "由责任人独立回看后端与物流项目原文",
+                "语言匹配、转语言经历或学习证据存在边界",
+                "确认语言适配能力后，可能改变四项条件中的不符合数量",
+                "由责任人独立回看语言项目、迁移经历和学习交付证据",
             ),
         )
 
+    if current_v10:
+        dimensions = priority_profile["qualification_dimensions"]
+        uncertain_count = sum(state == "unclear" for state in dimensions.values())
+        unmet_count = priority_profile["unmet_requirement_count"]
+        threshold_can_change = unmet_count < 2 <= unmet_count + uncertain_count
+        if not threshold_can_change:
+            uncertainties = [
+                item for item in uncertainties if item["code"] == "U11_UNTRUSTED_CONTENT"
+            ]
+
     if uncertainties:
         recommendation = "second_review"
+    elif current_v10:
+        recommendation = (
+            "do_not_advance_pending_human"
+            if priority_profile["unmet_requirement_count"] >= 2
+            else "advance_pending_human"
+        )
     elif target_stack == "no_qualifying_go":
         recommendation = "do_not_advance_pending_human"
     elif all(
@@ -855,12 +966,18 @@ def assemble_senior_record(
             )
             recommendation = "second_review"
 
+    if current_v10 and recommendation == "advance_pending_human":
+        for name, (criterion, _) in V10_DIMENSION_CRITERIA.items():
+            if priority_profile["qualification_dimensions"][name] == "not_met":
+                _ensure_probe(probes, criterion)
+        if priority_profile["qualification_dimensions"]["language_learning"] == "not_met":
+            _ensure_probe(probes, "SEN-BE-01")
     if recommendation == "advance_pending_human" and not _supported(
         by_criterion.get("SEN-AI-01", {}), "E1"
     ):
         _ensure_probe(probes, "SEN-AI-01")
     if (
-        current_v8_or_v9
+        (current_v8_or_v9 or current_v10)
         and recommendation == "advance_pending_human"
         and not _supported(by_criterion.get("SEN-FE-01", {}), "E2")
     ):
@@ -898,13 +1015,17 @@ def assemble_senior_record(
         rationale = "存在决策相关不确定性，需按原因码完成人工二审后再决定。"
         next_action = "回看原始简历并按原因码完成二审。"
     elif recommendation == "advance_pending_human":
-        if target_stack == "logistics_flexible_backend":
+        if current_v10:
+            rationale = f"四项新筛选条件中有 {priority_profile['unmet_requirement_count']} 项不符合，未达到两项暂不推进阈值；学历满足但无物流经验时，高含金量项目可保留推进资格。"
+        elif target_stack == "logistics_flexible_backend":
             rationale = "物流背景与非 Go 后端项目证据满足放宽路径，资深全栈核心证据达到推进标准，结论待人工一审核验。"
         else:
             rationale = "Go 硬门槛及资深全栈核心证据达到推进标准，结论待人工一审核验。"
         next_action = "由招聘责任人核对原文位置和证据强度并完成人工一审。"
     else:
-        if target_stack == "no_qualifying_go":
+        if current_v10:
+            rationale = f"学历、物流经验、高含金量项目、语言转换与学习证据四项中有 {priority_profile['unmet_requirement_count']} 项不符合，达到暂不推进阈值，结论待人工一审核验。"
+        elif target_stack == "no_qualifying_go":
             rationale = "Go 硬门槛或核心证据未达到岗位要求，且未命中物流背景放宽路径，结论待人工一审核验。"
         else:
             rationale = "核心证据未达到岗位要求，结论待人工一审核验。"
