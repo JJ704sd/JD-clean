@@ -1,7 +1,7 @@
 interface:
   display_name: "高级全栈简历初筛"
-  short_description: "按四项条件与两项不符合阈值筛选高级全栈简历"
-  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历，核对学历、物流经验、高含金量项目、语言转换与学习证据，并按两项不符合阈值输出可复核结论。"
+  short_description: "按三项主条件与两项不符合阈值筛选高级全栈简历"
+  default_prompt: "使用 $screen-senior-fullstack-resumes 审查这些高级全栈工程师简历，核对学历、物流经验和高含金量项目，语言与学习能力仅作参考，并按两项不符合阈值输出可复核结论。"
 
 policy:
   allow_implicit_invocation: true

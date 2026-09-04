@@ -255,7 +255,7 @@ class WatchCliTests(unittest.TestCase):
                     candidate_id="current",
                     role="senior-fullstack-engineer",
                     jd_version="senior-fullstack-2026-08-14-v1",
-                    rubric_version="senior-fullstack-2026-09-04-v10",
+                    rubric_version="senior-fullstack-2026-09-04-v11",
                 )
             )
 
@@ -336,7 +336,7 @@ class WatchCliTests(unittest.TestCase):
             )
             store.release_worker(second)
 
-    def test_v10_watch_runs_clean_assemble_score_validate_and_persist(self):
+    def test_v11_watch_runs_clean_assemble_score_validate_and_persist(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             incoming = root / "Downloads"
@@ -391,7 +391,7 @@ class WatchCliTests(unittest.TestCase):
             )
             self.assertEqual(
                 result["screening_record"]["rubric_version"],
-                "senior-fullstack-2026-09-04-v10",
+                "senior-fullstack-2026-09-04-v11",
             )
             self.assertIn("scorecard", result)
 

@@ -42,6 +42,7 @@ V7_DIRECT_CRITICAL = {"SEN-BE-01", "SEN-FE-01"}
 V8_DIRECT_CRITICAL = {"SEN-BE-01"}
 V9_DIRECT_CRITICAL = V8_DIRECT_CRITICAL
 V10_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v10"
+V11_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v11"
 V10_DIMENSION_CRITERIA = {
     "education": ("SEN-ADM-01", "E1"),
     "logistics": ("SEN-DOMAIN-01", "E2"),
@@ -665,6 +666,7 @@ def assemble_senior_record(
         in {
             "resume-screening-prompt-2026-09-01-v4",
             "resume-screening-prompt-2026-09-04-v5",
+            "resume-screening-prompt-2026-09-04-v6",
         }
         and rubric_version
         in {
@@ -672,17 +674,19 @@ def assemble_senior_record(
             "senior-fullstack-2026-09-01-v8",
             "senior-fullstack-2026-09-03-v9",
             V10_RUBRIC_VERSION,
+            V11_RUBRIC_VERSION,
         }
         else evidence_value
     )
     by_criterion = {
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
+    current_v11 = rubric_version == V11_RUBRIC_VERSION
     current_v10 = rubric_version == V10_RUBRIC_VERSION
     current_v9 = rubric_version == "senior-fullstack-2026-09-03-v9"
     current_v8 = rubric_version == "senior-fullstack-2026-09-01-v8"
     current_v8_or_v9 = current_v8 or current_v9
-    if current_v10:
+    if current_v11 or current_v10:
         advance_minimums = V9_ADVANCE_MINIMUMS
         negative_core = V9_NEGATIVE_CORE
         direct_critical = V9_DIRECT_CRITICAL
@@ -772,7 +776,7 @@ def assemble_senior_record(
             )
         )
     )
-    if current_v10:
+    if current_v11 or current_v10:
         if backend.get("state") == "conflicting" or backend.get("confidence") == "low":
             target_stack = "unclear"
         elif qualifying_go:
@@ -801,7 +805,7 @@ def assemble_senior_record(
             item for item in uncertainties if item["code"] != "U05_TRANSFERABILITY"
         ]
 
-    if not current_v10 and target_stack == "no_qualifying_go":
+    if not (current_v11 or current_v10) and target_stack == "no_qualifying_go":
         uncertainties = [
             item for item in uncertainties if item["code"] == "U11_UNTRUSTED_CONTENT"
         ]
@@ -848,7 +852,7 @@ def assemble_senior_record(
             else "not_evidenced"
         ),
     }
-    if current_v10:
+    if current_v11 or current_v10:
         def dimension_state(criterion: str, minimum: str) -> str:
             item = by_criterion.get(criterion, {})
             if item.get("state") == "conflicting" or item.get("confidence") == "low":
@@ -859,13 +863,15 @@ def assemble_senior_record(
             name: dimension_state(criterion, minimum)
             for name, (criterion, minimum) in V10_DIMENSION_CRITERIA.items()
         }
-        qualification_dimensions["language_learning"] = (
+        language_learning_state = (
             "unclear"
             if target_stack == "unclear"
             else "met"
             if target_stack in {"go_present", "language_transfer_supported"}
             else "not_met"
         )
+        if current_v10:
+            qualification_dimensions["language_learning"] = language_learning_state
         priority_profile["valuable_project_experience"] = {
             "met": "supported",
             "not_met": "not_evidenced",
@@ -875,10 +881,17 @@ def assemble_senior_record(
         priority_profile["unmet_requirement_count"] = sum(
             state == "not_met" for state in qualification_dimensions.values()
         )
+        if current_v11:
+            priority_profile["language_learning_signal"] = {
+                "met": "supported",
+                "not_met": "not_evidenced",
+                "unclear": "unclear",
+            }[language_learning_state]
 
     decision_ids = (
-        {criterion for criterion, _ in V10_DIMENSION_CRITERIA.values()} | {"SEN-BE-01"}
-        if current_v10
+        {criterion for criterion, _ in V10_DIMENSION_CRITERIA.values()}
+        | ({"SEN-BE-01"} if current_v10 else set())
+        if current_v11 or current_v10
         else set(advance_minimums) | negative_core
     )
     if current_v9 and target_stack in {
@@ -901,7 +914,7 @@ def assemble_senior_record(
         )
 
     probes = _normalize_probes(payload.get("interview_probes"), by_criterion)
-    if target_stack == "unclear" and not uncertainties:
+    if target_stack == "unclear" and not uncertainties and not current_v11:
         _add_uncertainty(
             uncertainties,
             _uncertainty(
@@ -912,7 +925,7 @@ def assemble_senior_record(
             ),
         )
 
-    if current_v10:
+    if current_v11 or current_v10:
         dimensions = priority_profile["qualification_dimensions"]
         uncertain_count = sum(state == "unclear" for state in dimensions.values())
         unmet_count = priority_profile["unmet_requirement_count"]
@@ -924,7 +937,7 @@ def assemble_senior_record(
 
     if uncertainties:
         recommendation = "second_review"
-    elif current_v10:
+    elif current_v11 or current_v10:
         recommendation = (
             "do_not_advance_pending_human"
             if priority_profile["unmet_requirement_count"] >= 2
@@ -966,18 +979,24 @@ def assemble_senior_record(
             )
             recommendation = "second_review"
 
-    if current_v10 and recommendation == "advance_pending_human":
+    if (current_v11 or current_v10) and recommendation == "advance_pending_human":
         for name, (criterion, _) in V10_DIMENSION_CRITERIA.items():
             if priority_profile["qualification_dimensions"][name] == "not_met":
                 _ensure_probe(probes, criterion)
-        if priority_profile["qualification_dimensions"]["language_learning"] == "not_met":
+        if (
+            current_v10
+            and priority_profile["qualification_dimensions"]["language_learning"] == "not_met"
+        ) or (
+            current_v11
+            and priority_profile["language_learning_signal"] != "supported"
+        ):
             _ensure_probe(probes, "SEN-BE-01")
     if recommendation == "advance_pending_human" and not _supported(
         by_criterion.get("SEN-AI-01", {}), "E1"
     ):
         _ensure_probe(probes, "SEN-AI-01")
     if (
-        (current_v8_or_v9 or current_v10)
+        (current_v8_or_v9 or current_v10 or current_v11)
         and recommendation == "advance_pending_human"
         and not _supported(by_criterion.get("SEN-FE-01", {}), "E2")
     ):
@@ -1015,7 +1034,9 @@ def assemble_senior_record(
         rationale = "存在决策相关不确定性，需按原因码完成人工二审后再决定。"
         next_action = "回看原始简历并按原因码完成二审。"
     elif recommendation == "advance_pending_human":
-        if current_v10:
+        if current_v11:
+            rationale = f"学历、物流经验、高含金量项目三项简历主条件中有 {priority_profile['unmet_requirement_count']} 项不符合，未达到两项暂不推进阈值；语言转换与学习仅作非阻断参考。"
+        elif current_v10:
             rationale = f"四项新筛选条件中有 {priority_profile['unmet_requirement_count']} 项不符合，未达到两项暂不推进阈值；学历满足但无物流经验时，高含金量项目可保留推进资格。"
         elif target_stack == "logistics_flexible_backend":
             rationale = "物流背景与非 Go 后端项目证据满足放宽路径，资深全栈核心证据达到推进标准，结论待人工一审核验。"
@@ -1023,7 +1044,9 @@ def assemble_senior_record(
             rationale = "Go 硬门槛及资深全栈核心证据达到推进标准，结论待人工一审核验。"
         next_action = "由招聘责任人核对原文位置和证据强度并完成人工一审。"
     else:
-        if current_v10:
+        if current_v11:
+            rationale = f"学历、物流经验、高含金量项目三项简历主条件中有 {priority_profile['unmet_requirement_count']} 项不符合，达到暂不推进阈值；语言转换与学习不计入淘汰数量。"
+        elif current_v10:
             rationale = f"学历、物流经验、高含金量项目、语言转换与学习证据四项中有 {priority_profile['unmet_requirement_count']} 项不符合，达到暂不推进阈值，结论待人工一审核验。"
         elif target_stack == "no_qualifying_go":
             rationale = "Go 硬门槛或核心证据未达到岗位要求，且未命中物流背景放宽路径，结论待人工一审核验。"

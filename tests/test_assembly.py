@@ -54,6 +54,123 @@ def assemble(
 
 
 class SeniorRecordAssemblyTests(unittest.TestCase):
+    def test_v11_all_core_combinations_ignore_language_signal_for_threshold(self):
+        dimension_criteria = {
+            "education": "SEN-ADM-01",
+            "logistics": "SEN-DOMAIN-01",
+            "valuable_project": "SEN-LEVEL-01",
+        }
+        for core_values in itertools.product((False, True), repeat=3):
+            for language_state in ("supported", "not_evidenced", "unclear"):
+                expected = dict(zip(dimension_criteria, core_values, strict=True))
+                with self.subTest(**expected, language_state=language_state):
+                    source = documented_senior_record()
+                    for name, criterion_id in dimension_criteria.items():
+                        if expected[name]:
+                            continue
+                        item = next(
+                            item
+                            for item in source["evidence"]
+                            if item["criterion_id"] == criterion_id
+                        )
+                        item.update(
+                            state="not_evidenced",
+                            strength="E0",
+                            excerpt=None,
+                            location=None,
+                            rationale="简历未提供充分证据",
+                            confidence="high",
+                        )
+                    backend = next(
+                        item
+                        for item in source["evidence"]
+                        if item["criterion_id"] == "SEN-BE-01"
+                    )
+                    if language_state == "not_evidenced":
+                        backend.update(
+                            state="not_evidenced",
+                            strength="E0",
+                            excerpt=None,
+                            location=None,
+                            rationale="简历未提供语言转换证据",
+                            confidence="high",
+                        )
+                    elif language_state == "unclear":
+                        backend["confidence"] = "low"
+                    record = assemble(
+                        {
+                            "evidence": source["evidence"],
+                            "uncertainties": [],
+                            "interview_probes": source["interview_probes"],
+                        },
+                        rubric_version="senior-fullstack-2026-09-04-v11",
+                    )
+                    unmet = sum(not value for value in core_values)
+                    self.assertEqual(
+                        record["priority_profile"]["unmet_requirement_count"], unmet
+                    )
+                    self.assertEqual(
+                        record["model_recommendation"],
+                        "do_not_advance_pending_human"
+                        if unmet >= 2
+                        else "advance_pending_human",
+                    )
+                    self.assertEqual(
+                        record["priority_profile"]["language_learning_signal"],
+                        language_state,
+                    )
+                    self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v11_missing_language_transition_is_non_blocking(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            excerpt="负责 Java 订单服务接口开发与生产上线",
+            rationale="有后端项目交付，但简历未体现转语言或转技术栈过程",
+            confidence="high",
+        )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v11",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 0)
+        self.assertEqual(
+            set(record["priority_profile"]["qualification_dimensions"]),
+            {"education", "logistics", "valuable_project"},
+        )
+        self.assertEqual(
+            record["priority_profile"]["language_learning_signal"], "not_evidenced"
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v11_unclear_language_evidence_does_not_force_second_review(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend["confidence"] = "low"
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v11",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(record["priority_profile"]["language_learning_signal"], "unclear")
+        self.assertFalse(record["human_review"]["level_2_required"])
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
     def test_v10_all_four_dimension_combinations_follow_two_unmet_threshold(self):
         dimension_criteria = {
             "education": "SEN-ADM-01",

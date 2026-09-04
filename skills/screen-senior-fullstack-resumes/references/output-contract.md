@@ -10,7 +10,7 @@
   "candidate_name": "张三",
   "role": "senior-fullstack-engineer",
   "jd_version": "senior-fullstack-2026-08-14-v1",
-  "rubric_version": "senior-fullstack-2026-09-04-v10",
+  "rubric_version": "senior-fullstack-2026-09-04-v11",
   "screening_status": "non_final",
   "model_recommendation": "second_review",
   "recommendation_rationale": "物流与高含金量项目证据均为低置信度，澄清后可能达到两项不符合阈值，需二审。",
@@ -22,10 +22,10 @@
     "qualification_dimensions": {
       "education": "met",
       "logistics": "unclear",
-      "valuable_project": "unclear",
-      "language_learning": "met"
+      "valuable_project": "unclear"
     },
-    "unmet_requirement_count": 0
+    "unmet_requirement_count": 0,
+    "language_learning_signal": "supported"
   },
   "recruiter_summary": {
     "strongest_matches": ["Go 生产后端交付", "Vue3 中后台独立实现", "有性能优化结果"],
@@ -78,17 +78,17 @@
 
 ## 关键约束
 
-- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-09-04-v10`。校验器继续只读兼容 v9 及更早记录；受四项累计规则影响的旧记录必须重筛，不能原地改写。
-- v10 的 `priority_profile.qualification_dimensions` 必须恰好包含 `education`、`logistics`、`valuable_project`、`language_learning`，状态只允许 `met`、`not_met`、`unclear`。`unmet_requirement_count` 必须等于 `not_met` 数量。0–1 项不符合建议推进，2–4 项不符合建议暂不推进；会改变阈值的 `unclear` 进入二审。
-- `target_stack` 只允许 `go_present`、`language_transfer_supported`、`language_learning_not_evidenced`、`unclear`。Go 项目级交付或转语言/转栈学习后真实交付可满足语言项；只有态度自评不满足。
-- 模型的新写入负载不包含 `strength`，而是为每项提供五字段事实清单；Python 生成最终记录中的 `E0`–`E3`。应用层随后生成独立 `scorecard`；`grade` 只按证据覆盖生成，不能替代四项累计规则。
+- 新记录固定使用 `schema_version: 1.2` 与 `rubric_version: senior-fullstack-2026-09-04-v11`。校验器继续只读兼容 v10 及更早记录；受三项累计规则影响的旧记录必须重筛，不能原地改写。
+- v11 的 `priority_profile.qualification_dimensions` 必须恰好包含 `education`、`logistics`、`valuable_project`，状态只允许 `met`、`not_met`、`unclear`。`unmet_requirement_count` 必须等于这三项中的 `not_met` 数量。0–1 项不符合建议推进，2–3 项不符合建议暂不推进；会改变阈值的 `unclear` 进入二审。
+- `language_learning_signal` 只允许 `supported`、`not_evidenced`、`unclear`，不进入不符合数量。`target_stack` 仅用于展示语言证据路径；语言信号缺失不单独触发二审或暂不推进。
+- 模型的新写入负载不包含 `strength`，而是为每项提供五字段事实清单；Python 生成最终记录中的 `E0`–`E3`。应用层随后生成独立 `scorecard`；`grade` 只按证据覆盖生成，不能替代三项累计规则。
 - `candidate_name` 是可选展示字段，只能转录简历明确给出的姓名，不得猜测或从邮箱推断；缺失时省略。姓名不参与证据与建议，`candidate_id` 仍是稳定审计主键。
 - 模型初筛始终为 `non_final`，不得伪造已完成的人审字段。
 - Schema 1.2 的人工终态必须记录带时区的 `level_1_reviewed_at`；需要二审时还必须记录 `level_2_reviewed_at`，且二审时间严格晚于一审。待审核状态的时间字段保持 `null`。
 - `strongest_matches` 和 `critical_gaps` 各不超过 3 条；`human_next_action` 只保留一个主动作。
 - `critical_gaps` 先按 `uncertainties` 的顺序概括决策相关待确认项，再用剩余位置记录非阻断缺口；结论渲染时不会重复显示前者。
 - 每个 criterion 恰好出现一次；`E0` 没有摘录，`E1`–`E3` 必须可定位。
-- 状态只允许 `supported`、`not_evidenced`、`conflicting`、`directly_not_met`。`conflicting` 必须同时记录 `U03_CONFLICTING_FACTS` 并二审；`directly_not_met` 仅在 1.2 中使用，且必须是候选人的可定位直接反证，不能从“未写”推断。
+- 状态只允许 `supported`、`not_evidenced`、`conflicting`、`directly_not_met`。三项主条件中的 `conflicting` 必须同时记录 `U03_CONFLICTING_FACTS` 并按阈值影响进入二审；语言参考冲突只生成追问。`directly_not_met` 仅在 1.2 中使用，且必须是候选人的可定位直接反证，不能从“未写”推断。
 - 方向性建议依赖的证据归类置信度为 `low` 时必须转 `second_review`；除可选姓名外，记录不得包含电话、邮箱或身份证号等直接标识符。
 - 每个不确定性都必须包含决策影响和人工动作，并与 L2 原因码完全一致。
 - `same_owner_separate_pass` 和独立解释复核要求盲审；`source_fact_confirmation` 不要求盲审，且 `blind_review_confirmed` 始终为 `null`。

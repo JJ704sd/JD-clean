@@ -104,8 +104,9 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
             "education": "学历",
             "logistics": "物流",
             "valuable_project": "高含金量项目",
-            "language_learning": "语言/学习",
         }
+        if "language_learning" in dimensions:
+            names["language_learning"] = "语言/学习"
         states = {"met": "满足", "not_met": "不符合", "unclear": "待确认"}
         summary = "；".join(
             f"{names[key]}{states.get(dimensions.get(key), '无效')}" for key in names
@@ -123,6 +124,15 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
     if not signals:
         signals.append("未提供重构或物流行业项目证据")
     return stack, "、".join(signals)
+
+
+def _column_labels(record: dict[str, Any]) -> tuple[str, str]:
+    rubric_version = record.get("rubric_version")
+    if rubric_version == "senior-fullstack-2026-09-04-v11":
+        return "语言参考", "三项筛选"
+    if rubric_version == "senior-fullstack-2026-09-04-v10":
+        return "语言路径", "四项筛选"
+    return "语言路径", "优先信号"
 
 
 def _top_evidence(record: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
@@ -178,6 +188,7 @@ def render_single(
     name = _candidate_name(record)
     candidate_id = _clean(record["candidate_id"])
     stack_priority, priority_signals = _priority_labels(record)
+    language_label, screening_label = _column_labels(record)
     lines = [
         f"### 初筛结论｜{name}（{candidate_id}）",
         "",
@@ -186,8 +197,8 @@ def render_single(
         f"| 候选人 | {name}（{candidate_id}） |",
         f"| 岗位 | {ROLE_LABEL} |",
         f"| 规则版本 | {_clean(record['rubric_version'])} |",
-        f"| 语言路径 | {stack_priority} |",
-        f"| 四项筛选 | {priority_signals} |",
+        f"| {language_label} | {stack_priority} |",
+        f"| {screening_label} | {priority_signals} |",
         f"| 初筛建议（非最终） | {RECOMMENDATION_LABELS[record['model_recommendation']]} |",
         f"| 核心判断 | {_clip(record['recommendation_rationale'], 160)} |",
         f"| 人工复核 | {_review_line(record)} |",
@@ -233,7 +244,7 @@ def render_single(
                 "",
                 "## 结论汇总表",
                 "",
-                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 语言路径 | 四项筛选 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
+                f"| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | {language_label} | {screening_label} | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
                 "|---|---|---|---|---|---|---|---|---|",
                 "| "
                 + " | ".join(
@@ -274,6 +285,7 @@ def render_batch(
         for key in RECOMMENDATION_LABELS
     }
     first = records[0]
+    language_label, screening_label = _column_labels(first)
     lines = [
         "## 批量初筛概览",
         "",
@@ -281,7 +293,7 @@ def render_batch(
         f"- 规则版本：{_clean(first['rubric_version'])}",
         f"- 共 {len(records)} 份：建议推进 {counts['advance_pending_human']}，二审 {counts['second_review']}，暂不推进 {counts['do_not_advance_pending_human']}",
         "",
-        "| 候选人姓名 | 候选人 ID | 初筛建议 | 语言路径 | 四项筛选 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
+        f"| 候选人姓名 | 候选人 ID | 初筛建议 | {language_label} | {screening_label} | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for record in records:

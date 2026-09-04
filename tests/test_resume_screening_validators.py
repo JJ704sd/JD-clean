@@ -142,9 +142,9 @@ def make_advance(skill_dir: str) -> dict:
             "education": "met",
             "logistics": "met",
             "valuable_project": "met",
-            "language_learning": "met",
         }
         profile["unmet_requirement_count"] = 0
+        profile["language_learning_signal"] = "supported"
     else:
         set_supported(record, "INT-AVAIL-01", "E1")
     return record
@@ -158,12 +158,16 @@ def make_negative(skill_dir: str) -> dict:
     if skill_dir == SENIOR_DIR:
         set_not_evidenced(record, "SEN-BE-01")
         set_not_evidenced(record, "SEN-DOMAIN-01")
+        set_not_evidenced(record, "SEN-LEVEL-01")
         set_not_evidenced(record, "SEN-FE-01")
         record["priority_profile"]["target_stack"] = "language_learning_not_evidenced"
         record["priority_profile"]["logistics_experience"] = "not_evidenced"
+        record["priority_profile"]["refactoring_experience"] = "not_evidenced"
+        record["priority_profile"]["valuable_project_experience"] = "not_evidenced"
         record["priority_profile"]["qualification_dimensions"]["logistics"] = "not_met"
-        record["priority_profile"]["qualification_dimensions"]["language_learning"] = "not_met"
+        record["priority_profile"]["qualification_dimensions"]["valuable_project"] = "not_met"
         record["priority_profile"]["unmet_requirement_count"] = 2
+        record["priority_profile"]["language_learning_signal"] = "not_evidenced"
     else:
         set_not_evidenced(record, "INT-BE-01")
         set_not_evidenced(record, "INT-WEB-01")
@@ -265,7 +269,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                 self.assertIn("共 2 份：建议推进 1，二审 1，暂不推进 0", output)
                 self.assertIn("| 候选人 ID | 初筛建议 |", output)
                 if skill_dir == SENIOR_DIR:
-                    self.assertIn("| 初筛建议 | 语言路径 | 四项筛选 |", output)
+                    self.assertIn("| 初筛建议 | 语言参考 | 三项筛选 |", output)
                 self.assertIn("## 二审队列", output)
                 self.assertEqual(output.count("### 初筛结论｜"), 1)
                 self.assertRegex(output, r"### 初筛结论｜[^\n]*candidate-second")
@@ -365,7 +369,7 @@ class ScreeningValidatorTests(unittest.TestCase):
         }
         go_output = SENIOR_RENDERER.render_single(go_record)
         self.assertIn("| 语言路径 | Go 已满足 |", go_output)
-        self.assertIn("| 四项筛选 | 重构经验、物流行业经验 |", go_output)
+        self.assertIn("| 优先信号 | 重构经验、物流行业经验 |", go_output)
 
         node_record = make_advance(SENIOR_DIR)
         node_record["rubric_version"] = SENIOR.V5_RUBRIC_VERSION
@@ -377,7 +381,7 @@ class ScreeningValidatorTests(unittest.TestCase):
         set_not_evidenced(node_record, "SEN-DOMAIN-01")
         node_output = SENIOR_RENDERER.render_single(node_record)
         self.assertIn("| 语言路径 | 仅 Node.js（优先级较低） |", node_output)
-        self.assertIn("| 四项筛选 | 未提供重构或物流行业项目证据 |", node_output)
+        self.assertIn("| 优先信号 | 未提供重构或物流行业项目证据 |", node_output)
 
         flexible_record = make_advance(SENIOR_DIR)
         flexible_record["rubric_version"] = SENIOR.V9_RUBRIC_VERSION
@@ -959,10 +963,9 @@ class ScreeningValidatorTests(unittest.TestCase):
         )
 
         senior_negative = make_negative(SENIOR_DIR)
-        for criterion_id in ("SEN-BE-01", "SEN-ARCH-01", "SEN-FE-01"):
-            evidence_item(senior_negative, criterion_id)["confidence"] = "low"
-        senior_negative["priority_profile"]["target_stack"] = "unclear"
-        senior_negative["priority_profile"]["qualification_dimensions"]["language_learning"] = "unclear"
+        evidence_item(senior_negative, "SEN-LEVEL-01")["confidence"] = "low"
+        senior_negative["priority_profile"]["valuable_project_experience"] = "unclear"
+        senior_negative["priority_profile"]["qualification_dimensions"]["valuable_project"] = "unclear"
         senior_negative["priority_profile"]["unmet_requirement_count"] = 1
         self.assertTrue(
             any(
@@ -988,7 +991,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                 record["model_recommendation"] = "do_not_advance_pending_human"
                 errors = validator.validate_record(record)
                 expected = (
-                    "v10 negative recommendation requires at least two unmet"
+                    "current rubric negative recommendation requires at least two unmet"
                     if skill_dir == SENIOR_DIR
                     else "negative evidence gate"
                 )
@@ -999,7 +1002,7 @@ class ScreeningValidatorTests(unittest.TestCase):
             with self.subTest(skill=skill_dir):
                 record = make_negative(skill_dir)
                 criterion_id = (
-                    "SEN-BE-01" if skill_dir == SENIOR_DIR else "INT-AVAIL-01"
+                    "SEN-DOMAIN-01" if skill_dir == SENIOR_DIR else "INT-AVAIL-01"
                 )
                 item = evidence_item(record, criterion_id)
                 item.update(
@@ -1030,6 +1033,7 @@ class ScreeningValidatorTests(unittest.TestCase):
         senior["recruiter_summary"]["critical_gaps"] = ["明确没有后端生产交付"]
         set_directly_not_met(senior, "SEN-BE-01", "E2")
         senior["priority_profile"]["target_stack"] = "language_learning_not_evidenced"
+        senior["priority_profile"]["language_learning_signal"] = "not_evidenced"
         self.assertEqual(SENIOR.validate_record(senior), [])
 
         intern = make_advance(INTERN_DIR)

@@ -28,7 +28,7 @@ ROLE_SKILL_FILES = {
             "references/conclusion-format.md",
             "references/output-contract.md",
             "references/decision-examples.md",
-            "references/calibration-notes-v10.md",
+            "references/calibration-notes-v11.md",
         ),
     ),
     "fullstack-development-intern": (
@@ -94,12 +94,13 @@ def build_system_prompt(
             in {
                 "resume-screening-prompt-2026-09-01-v4",
                 "resume-screening-prompt-2026-09-04-v5",
+                "resume-screening-prompt-2026-09-04-v6",
             }
         ):
             evidence_contract = """- evidence：必须恰好覆盖 rubric 的 9 个 criterion。每项只包含 criterion_id、state、excerpt、location、rationale、confidence、evidence_factors；不得输出 strength，Python 将按事实清单生成 E0-E3。
 - evidence_factors 必须包含 project_context、personal_action、method_or_tradeoff、result_scope、verifiable_impact 五个字段；每个字段只能填写简历原文可支持的最短事实，未提供则为 null，不得推断或把同一句空泛描述重复填入多个字段。
 - 对 SEN-LEVEL-01，重点把业务量、使用量/覆盖、个人参与程度和业务复杂度映射到事实字段；至少两类可信事实且有个人动作才可支持高含金量项目。WMS、CRM、VMS/TMS、ERP 等名称本身最多是关键词。
-- 对 SEN-BE-01，区分目标语言项目交付、已完成的转语言/转栈学习交付和单纯“愿意学习”自评；只有前两类可支持语言学习条件。
+- 对 SEN-BE-01，区分目标语言项目交付、已完成的转语言/转栈学习交付和单纯“愿意学习”自评；该维度仅用于非阻断参考和面试追问，不进入学历、物流、高含金量项目三项计数。
 - Python 判定：没有可定位事实为 E0；只有关键词/自评为 E1；同时具备项目背景和个人动作才可为 E2；五项事实全部具备才可为 E3，缺一项最多 E2。行政条件按明确原文单独处理。
 - 不得输出 U01、U09、U10、U11；解析质量、明确岗位冲突、rubric版本和指令性内容由 Python 按严格条件生成。"""
             trace_contract = "所有非空证据必须包含最短原文和页码位置；无证据使用 null 原文和位置。"
@@ -127,6 +128,7 @@ def build_system_prompt(
         in {
             "resume-screening-prompt-2026-09-01-v4",
             "resume-screening-prompt-2026-09-04-v5",
+            "resume-screening-prompt-2026-09-04-v6",
         }
     )
     untrusted_instruction = (

@@ -10,17 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PromptContractTests(unittest.TestCase):
-    def test_senior_prompt_v5_requests_facts_without_model_strength(self):
+    def test_senior_prompt_v6_requests_facts_without_model_strength(self):
         prompt = build_system_prompt(
             ROOT,
             role="senior-fullstack-engineer",
             candidate_id="candidate-test",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-04-v10",
+            rubric_version="senior-fullstack-2026-09-04-v11",
             prompt_version=PROMPT_VERSION,
         )
 
-        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-04-v5")
+        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-04-v6")
         self.assertIn("<evidence-extraction-contract>", prompt)
         self.assertIn(
             "顶层字段只能是 evidence、uncertainties、interview_probes", prompt
@@ -32,6 +32,9 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("unmet_requirement_count", prompt)
         self.assertIn("业务量、使用量", prompt)
         self.assertIn("WMS", prompt)
+        self.assertIn("仅用于非阻断参考", prompt)
+        self.assertIn("高级全栈 v11 校准记录", prompt)
+        self.assertNotIn("v10 用四项累计规则", prompt)
 
     def test_senior_prompt_requires_complete_uncertainty_fields(self):
         prompt = build_system_prompt(
@@ -39,7 +42,7 @@ class PromptContractTests(unittest.TestCase):
             role="senior-fullstack-engineer",
             candidate_id="candidate-test",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-04-v10",
+            rubric_version="senior-fullstack-2026-09-04-v11",
             prompt_version=PROMPT_VERSION,
         )
 

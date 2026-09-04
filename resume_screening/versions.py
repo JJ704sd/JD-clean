@@ -11,13 +11,13 @@ from __future__ import annotations
 from .cleaning import PARSER_VERSION
 
 SCORING_VERSION = "evidence-score-2026-09-01-v2"
-PROMPT_VERSION = "resume-screening-prompt-2026-09-04-v5"
+PROMPT_VERSION = "resume-screening-prompt-2026-09-04-v6"
 
 ROLE_VERSIONS: dict[str, tuple[str, str]] = {
     "ai-product-manager": ("ai-pm-2026-08-v2", "ai-pm-rubric-2026-08-18-v3"),
     "senior-fullstack-engineer": (
         "senior-fullstack-2026-08-14-v1",
-        "senior-fullstack-2026-09-04-v10",
+        "senior-fullstack-2026-09-04-v11",
     ),
     "fullstack-development-intern": (
         "fullstack-intern-2026-08-14-v1",
