@@ -203,6 +203,8 @@ uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-ru
 uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply --screening
 ```
 
+发布器生成的 `resume.feishu.md` 是面向面试官的展示稿：不包含候选人哈希、解析器版本、时间戳等 YAML 元数据；`resume.cleaned.md` 仍保留这些审计字段。展示稿会按语义块增加段落留白，并对正文中实际出现的技术栈关键词使用飞书支持的浅黄色背景高亮。发布时同时生成 `resume.feishu.xml`，在线文档会在 Markdown 导入后用该 DocxXML 侧车覆盖一次并回读确认高亮已经持久化。标准 Markdown 和当前飞书导入格式没有可靠的字符间距属性，因此不会向技术词内部插入空格，以免破坏复制、搜索和筛选；间距调整采用安全的段落节奏作为兼容方案。
+
 启用 `--screening` 时，发布器不会在“仅完成飞书回读”后展示链接；`resume-index.md` 初始只保留标题。worker 完成任务后，用与发布时相同的筛选参数再执行一次本地 dry-run 刷新索引：
 
 ```powershell

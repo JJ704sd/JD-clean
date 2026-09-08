@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -82,6 +83,102 @@ REQUIRED_HEADINGS = (
     "## 证书与语言能力",
     "## 其他信息",
 )
+# The Markdown writer is also consumed by Feishu's document importer.  Feishu
+# accepts the documented XML-style inline tags while parsing Markdown, so use a
+# small, portable span for recruiter-facing keyword emphasis instead of raw
+# HTML/CSS that would be shown literally by other Markdown renderers.
+TECH_STACK_TERMS = (
+    "Cloudflare Workers",
+    "Cloudflare Worker",
+    "Docker Compose",
+    "React Native",
+    "Spring Boot",
+    "Tailwind CSS",
+    "TailwindCSS",
+    "Lightweight-charts",
+    "React.js",
+    "Vue.js",
+    "Next.js",
+    "Node.js",
+    "Nodejs",
+    "TypeScript",
+    "JavaScript",
+    "GraphQL",
+    "Drizzle ORM",
+    "Playwright",
+    "Streamlit",
+    "Kubernetes",
+    "PostgreSQL",
+    "MongoDB",
+    "Cloudflare",
+    "Tailwind",
+    "Webpack",
+    "ReactJS",
+    "React",
+    "Vue",
+    "Next",
+    "Nuxt",
+    "Svelte",
+    "Flutter",
+    "UniApp",
+    "uni-app",
+    "pnpm",
+    "npm",
+    "yarn",
+    "Vite",
+    "Eslint",
+    "ESLint",
+    "Prettier",
+    "JSDoc",
+    "Hono",
+    "SQL",
+    "MySQL",
+    "Redis",
+    "Nginx",
+    "Docker",
+    "Ubuntu",
+    "AWS",
+    "Sentry",
+    "GitHub",
+    "Git",
+    "Python",
+    "Golang",
+    "Go",
+    "Java",
+    "C#",
+    "C++",
+    "Django",
+    "FastAPI",
+    "Spring",
+    "Shell",
+    "Bash",
+    "Web3",
+    "Wagmi",
+    "Ethers",
+    "Solana",
+    "IPFS",
+    "LLM",
+    "MCP",
+    "Dify",
+    "OpenClaw",
+    "CI/CD",
+    "Monorepo",
+    "SDK",
+    "REST API",
+    "API",
+    "HTML",
+    "CSS",
+)
+TECH_STACK_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    + "|".join(re.escape(term) for term in sorted(set(TECH_STACK_TERMS), key=len, reverse=True))
+    + r")(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+INLINE_LITERAL_PATTERN = re.compile(r"`[^`\n]+`|https?://[^\s)]+", re.IGNORECASE)
+TECH_STACK_HIGHLIGHT_TEMPLATE = '<span background-color="light-yellow">{}</span>'
+RICH_HIGHLIGHT_MARKER = 'background-color="light-yellow"'
+RICH_HIGHLIGHT_PATTERN = re.compile(r'<span\b[^>]*background-color="[^"]+"', re.IGNORECASE)
 SECTION_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("个人简介", ("个人简介", "个人优势", "自我评价", "自我介绍", "核心优势", "个人概况")),
     ("教育经历", ("教育经历", "教育背景", "学历背景", "教育情况", "Education")),
@@ -385,6 +482,71 @@ class LarkCLI:
         return CliResponse(result.returncode, payload, stderr, stdout)
 
 
+def apply_rich_document_content(
+    cli: LarkCLI,
+    document_url: str,
+    rich_content_path: Path,
+) -> tuple[bool, str | None]:
+    """Overwrite a document with DocxXML and verify persisted rich text."""
+
+    try:
+        source = rich_content_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"cannot read rich content: {exc}"
+    if not source.strip():
+        return False, "rich content is empty"
+    updated = cli.run(
+        [
+            "docs",
+            "+update",
+            "--doc",
+            document_url,
+            "--command",
+            "overwrite",
+            "--content",
+            "@" + relative_to_root(rich_content_path),
+            "--doc-format",
+            "xml",
+            "--as",
+            "user",
+            "--format",
+            "json",
+        ],
+        timeout=90,
+    )
+    if not updated.ok:
+        return False, "rich content update failed: " + updated.diagnostic
+
+    verified = cli.run(
+        [
+            "docs",
+            "+fetch",
+            "--doc",
+            document_url,
+            "--doc-format",
+            "xml",
+            "--detail",
+            "full",
+            "--as",
+            "user",
+            "--format",
+            "json",
+        ],
+        timeout=90,
+    )
+    if not verified.ok:
+        return False, "rich content readback failed: " + verified.diagnostic
+    payload = verified.payload if isinstance(verified.payload, dict) else {}
+    data = payload.get("data") if isinstance(payload, dict) else None
+    document = data.get("document") if isinstance(data, dict) else None
+    persisted = document.get("content") if isinstance(document, dict) else None
+    if not isinstance(persisted, str) or not persisted.strip():
+        return False, "rich content readback returned an empty document"
+    if RICH_HIGHLIGHT_MARKER in source and not RICH_HIGHLIGHT_PATTERN.search(persisted):
+        return False, "rich content readback lost the technical-keyword highlight"
+    return True, None
+
+
 class DestinationLock:
     """Cross-process exclusive lock for a single Feishu folder destination."""
 
@@ -563,19 +725,148 @@ def normalize_body(text: str) -> str:
     return "\n".join(lines)
 
 
-def structured_markdown(cleaned: Any, candidate_name: str) -> str:
-    frontmatter = (
-        "---\n"
-        f"candidate_id: {cleaned.candidate_id}\n"
-        f"source_sha256: {cleaned.source_sha256}\n"
-        f"parser_version: {cleaned.parser_version}\n"
-        f"generated_at: {now_utc()}\n"
-        f"used_ocr: {str(cleaned.used_ocr).lower()}\n"
-        f"page_count: {cleaned.page_count}\n"
-        "document_format: structured_resume_markdown\n"
-        "privacy: pii_redacted\n"
-        "---\n\n"
+def _is_cjk(character: str) -> bool:
+    return bool(character) and (
+        "\u2e80" <= character <= "\u9fff"
+        or "\uac00" <= character <= "\ud7a3"
+        or "\uf900" <= character <= "\ufaff"
     )
+
+
+def _join_wrapped_lines(lines: Sequence[str]) -> str:
+    """Join a visually wrapped extracted line without changing its words."""
+
+    if not lines:
+        return ""
+    result = lines[0]
+    for line in lines[1:]:
+        if not result or not line:
+            result += line
+        elif result[-1].isspace() or line[0] in ",.!?;:，。！？；：、)]}）】》”’":
+            result += line
+        elif _is_cjk(result[-1]) and _is_cjk(line[0]):
+            result += line
+        else:
+            result += " " + line
+    return result
+
+
+def _starts_presentation_block(line: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:#{1,6}\s|(?:[-*•]\s)|>>\s|\d{4}[./-]\d{1,2}|[^\s:：]{1,16}[:：])",
+            line,
+        )
+    )
+
+
+def _presentation_blocks(text: str) -> list[str]:
+    """Turn extraction lines into readable Markdown paragraphs.
+
+    Standard Markdown has no portable line-height or letter-spacing control.
+    Separate semantic blocks with one blank line instead of inserting spaces
+    into words, which keeps copy/search and recruiter parsing reliable while
+    giving Feishu a more breathable paragraph rhythm.
+    """
+
+    blocks: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            blocks.append(_join_wrapped_lines(current))
+            current.clear()
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        if current and _starts_presentation_block(line):
+            flush()
+        current.append(line)
+    flush()
+    return blocks
+
+
+def _highlight_technical_terms(text: str) -> str:
+    """Highlight only terms present in the resume, preserving URLs/code spans."""
+
+    protected: list[str] = []
+
+    def protect(match: re.Match[str]) -> str:
+        token = f"\x00{len(protected)}\x00"
+        protected.append(match.group(0))
+        return token
+
+    masked = INLINE_LITERAL_PATTERN.sub(protect, text)
+    highlighted = TECH_STACK_PATTERN.sub(
+        lambda match: TECH_STACK_HIGHLIGHT_TEMPLATE.format(match.group(0)),
+        masked,
+    )
+    for index, original in enumerate(protected):
+        highlighted = highlighted.replace(f"\x00{index}\x00", original)
+    return highlighted
+
+
+def _format_section_value(value: str) -> str:
+    normalized = normalize_body(value)
+    blocks = _presentation_blocks(normalized)
+    if not blocks:
+        return "未提及"
+    return "\n\n".join(_highlight_technical_terms(block) for block in blocks)
+
+
+def _xml_inline_text(text: str) -> str:
+    """Escape Markdown text while preserving our documented highlight spans."""
+
+    parts: list[str] = []
+    last = 0
+    for match in re.finditer(
+        r'<span background-color="light-yellow">(.*?)</span>',
+        text,
+        flags=re.DOTALL,
+    ):
+        parts.append(html.escape(text[last : match.start()], quote=False))
+        parts.append(TECH_STACK_HIGHLIGHT_TEMPLATE.format(html.escape(match.group(1), quote=False)))
+        last = match.end()
+    parts.append(html.escape(text[last:], quote=False))
+    return "".join(parts).replace("\n", "<br/>")
+
+
+def structured_xml(markdown: str) -> str:
+    """Convert presentation Markdown to the DocxXML accepted by Feishu.
+
+    Markdown import is useful for portability, but the Markdown importer does
+    not persist inline ``span`` styles.  The XML sidecar is therefore the
+    canonical rich-text payload used for the final online document update.
+    """
+
+    blocks = [block.strip() for block in markdown.split("\n\n") if block.strip()]
+    xml_blocks: list[str] = []
+    index = 0
+    while index < len(blocks):
+        block = blocks[index]
+        if block.startswith("# "):
+            xml_blocks.append(f"<title>{_xml_inline_text(block[2:].strip())}</title>")
+        elif block.startswith("## "):
+            xml_blocks.append(f"<h1>{_xml_inline_text(block[3:].strip())}</h1>")
+        elif re.match(r"^(?:[-*•])\s+", block):
+            items: list[str] = []
+            while index < len(blocks) and re.match(r"^(?:[-*•])\s+", blocks[index]):
+                items.append(re.sub(r"^(?:[-*•])\s+", "", blocks[index], count=1))
+                index += 1
+            xml_blocks.append("<ul>" + "".join(f"<li>{_xml_inline_text(item)}</li>" for item in items) + "</ul>")
+            continue
+        elif block.startswith(">> "):
+            xml_blocks.append(f"<blockquote><p>{_xml_inline_text(block[3:].strip())}</p></blockquote>")
+        else:
+            xml_blocks.append(f"<p>{_xml_inline_text(block)}</p>")
+        index += 1
+    return "".join(xml_blocks)
+
+
+def structured_markdown(cleaned: Any, candidate_name: str) -> str:
     body = cleaned.markdown.split("---\n\n", 1)[-1]
     body = redact_for_model(_strip_opaque_platform_tokens(body), candidate_name=candidate_name)
     body = normalize_body(body)
@@ -594,17 +885,19 @@ def structured_markdown(cleaned: Any, candidate_name: str) -> str:
     output: list[str] = [
         "# 简历",
         "",
-        "> 本文由本地 PDF 文本层提取/OCR 回退后脱敏整理；未提及信息统一标为“未提及”。",
-        "",
     ]
     for section in ("基本信息", "个人简介", "教育经历", "工作经历", "项目经历", "技能", "证书与语言能力", "其他信息"):
-        value = normalize_body("\n\n".join(part.strip() for part in sections.get(section, []) if part.strip())) or "未提及"
+        value = _format_section_value(
+            "\n\n".join(part.strip() for part in sections.get(section, []) if part.strip())
+        )
         output.extend((f"## {section}", "", value, ""))
-    return frontmatter + "\n".join(output).rstrip() + "\n"
+    return "\n".join(output).rstrip() + "\n"
 
 
 def markdown_quality_issues(content: str) -> list[str]:
     issues: list[str] = []
+    if content.lstrip().startswith("---"):
+        issues.append("presentation Markdown contains metadata frontmatter")
     missing = [heading for heading in REQUIRED_HEADINGS if heading not in content]
     if missing:
         issues.append("missing headings: " + ",".join(missing))
@@ -637,11 +930,15 @@ def prepare_markdown(path: Path, candidate_id: str, candidate_name: str, output_
     destination = output_directory / candidate_id
     atomic_write(destination / "resume.cleaned.md", cleaned.markdown)
     atomic_write(destination / "resume.feishu.md", structured)
+    rich_content = structured_xml(structured)
+    atomic_write(destination / "resume.feishu.xml", rich_content)
     return {
         "candidate_id": candidate_id,
         "markdown_path": str((destination / "resume.feishu.md").resolve()),
         "cleaned_markdown_path": str((destination / "resume.cleaned.md").resolve()),
+        "rich_content_path": str((destination / "resume.feishu.xml").resolve()),
         "markdown_chars": len(structured),
+        "rich_content_chars": len(rich_content),
         "page_count": cleaned.page_count,
         "used_ocr": cleaned.used_ocr,
         "parser_version": PARSER_VERSION,
@@ -1156,7 +1453,12 @@ class FeishuResumeMonitor:
             return {"status": "import_failed", "attempts": attempts, "transient_attempts": total_transient_attempts, "url": url, "ticket": ticket, "error": "document_readback_failed: " + "; ".join(issues)}
         return {"status": "success", "attempts": attempts, "transient_attempts": total_transient_attempts, "ticket": ticket, "url": url, "readback_nonempty": True, "readback_chars": len(content.strip())}
 
-    def _import_unlocked(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def _import_unlocked(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         args = [
             "drive",
             "+import",
@@ -1218,17 +1520,39 @@ class FeishuResumeMonitor:
             if polled.get("status") != "ok":
                 return {"status": "import_failed", "attempts": attempts, "transient_attempts": transient_attempts + int(polled.get("transient_attempts", 0)), "ticket": ticket, "error": polled.get("error")}
             url = str(polled["url"])
-        return self._fetch_document(
+        rich_format_applied = False
+        if rich_content_path is not None:
+            applied, error = apply_rich_document_content(self.cli, url, rich_content_path)
+            if not applied:
+                return {
+                    "status": "import_failed",
+                    "attempts": attempts,
+                    "transient_attempts": transient_attempts,
+                    "ticket": ticket,
+                    "url": url,
+                    "rich_format_applied": False,
+                    "error": "document_rich_format_failed: " + str(error),
+                }
+            rich_format_applied = True
+        result = self._fetch_document(
             url,
             attempts=attempts,
             transient_attempts=transient_attempts,
             ticket=ticket,
         )
+        if rich_content_path is not None:
+            result["rich_format_applied"] = rich_format_applied
+        return result
 
-    def import_document(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def import_document(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         try:
             with DestinationLock(self.config.lock_path):
-                return self._import_unlocked(markdown_path, display_name)
+                return self._import_unlocked(markdown_path, display_name, rich_content_path)
         except ImportLockBusy as exc:
             return {"status": "import_pending", "attempts": 0, "error": str(exc)}
 
@@ -1631,7 +1955,22 @@ class FeishuResumeMonitor:
                 "updated_at": now_utc(),
             }
             self._save_cycle(report, state)
-            result = self.import_document(Path(item["markdown_path"]), f"{safe_name(str(item['candidate_name']))}-简历")
+            rich_content_path = (
+                Path(item["rich_content_path"])
+                if item.get("rich_content_path")
+                else None
+            )
+            if rich_content_path is None:
+                result = self.import_document(
+                    Path(item["markdown_path"]),
+                    f"{safe_name(str(item['candidate_name']))}-简历",
+                )
+            else:
+                result = self.import_document(
+                    Path(item["markdown_path"]),
+                    f"{safe_name(str(item['candidate_name']))}-简历",
+                    rich_content_path,
+                )
             state_entry = self._record_import_result(
                 preflight,
                 item,

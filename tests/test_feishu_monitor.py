@@ -28,6 +28,7 @@ from resume_screening.feishu_monitor import (
     markdown_quality_issues,
     pdf_key,
     structured_markdown,
+    structured_xml,
     writeback_diagnostics,
 )
 from resume_screening.feishu_screening import (
@@ -1020,7 +1021,7 @@ class FeishuMonitorTests(unittest.TestCase):
             (False, "", None),
         )
 
-    def test_structured_markdown_has_required_sections_and_privacy_markers(self):
+    def test_structured_markdown_has_required_sections_and_no_frontmatter(self):
         cleaned = SimpleNamespace(
             candidate_id="feishu-test",
             source_sha256="a" * 64,
@@ -1042,7 +1043,51 @@ class FeishuMonitorTests(unittest.TestCase):
         )))
         self.assertNotIn("13812345678", document)
         self.assertNotIn("张三", document)
+        self.assertNotIn("candidate_id:", document)
+        self.assertNotIn("source_sha256:", document)
+        self.assertIn(
+            '<span background-color="light-yellow">Go</span>',
+            document,
+        )
         self.assertEqual(markdown_quality_issues(document), [])
+
+    def test_structured_markdown_preserves_searchable_literals_and_adds_block_spacing(self):
+        cleaned = SimpleNamespace(
+            candidate_id="feishu-test",
+            source_sha256="a" * 64,
+            parser_version="test",
+            used_ocr=False,
+            page_count=1,
+            markdown=(
+                "---\n\n"
+                "基本信息\n"
+                "GitHub: https://github.com/go/example\n"
+                "技能\n"
+                "使用 React\n"
+                "完成页面开发\n"
+            ),
+        )
+
+        document = structured_markdown(cleaned, "张三")
+
+        self.assertIn("https://github.com/go/example", document)
+        self.assertIn("<span background-color=\"light-yellow\">React</span>", document)
+        self.assertNotIn("<span background-color=\"light-yellow\">go</span>", document)
+        self.assertIn("使用 <span background-color=\"light-yellow\">React</span> 完成页面开发", document)
+        self.assertIn("## 基本信息\n\n", document)
+
+    def test_structured_xml_preserves_highlights_and_escapes_text(self):
+        markdown = (
+            "# 简历\n\n"
+            "## 技能\n\n"
+            "使用 <span background-color=\"light-yellow\">React</span> & API\n"
+        )
+
+        document = structured_xml(markdown)
+
+        self.assertTrue(document.startswith("<title>简历</title>"))
+        self.assertIn('<span background-color="light-yellow">React</span>', document)
+        self.assertIn("&amp; API", document)
 
 
 if __name__ == "__main__":

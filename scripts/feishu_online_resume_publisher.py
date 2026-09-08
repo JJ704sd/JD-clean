@@ -34,6 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from resume_screening.cleaning import ResumeQualityError
 from resume_screening.feishu_monitor import (
+    apply_rich_document_content,
     CliResponse,
     LarkCLI,
     MonitorError,
@@ -60,7 +61,7 @@ from resume_screening.queue import TaskStore
 from resume_screening.versions import ROLE_VERSIONS, contract_matches
 
 
-SCRIPT_VERSION = "feishu-online-resume-publisher-v3"
+SCRIPT_VERSION = "feishu-online-resume-publisher-v4"
 STATE_VERSION = 1
 DEFAULT_JOB_PREFIX = "全栈工程师_深圳 15-25K"
 DEFAULT_SOURCE_DIRECTORY = Path.home() / "Downloads"
@@ -281,7 +282,37 @@ class OnlineFeishuImporter:
             "readback_chars": len(content.strip()),
         }
 
-    def _poll_ticket(self, ticket: str) -> dict[str, Any]:
+    def _finalize_document(
+        self,
+        url: str,
+        ticket: str | None = None,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
+        if rich_content_path is not None:
+            applied, error = apply_rich_document_content(
+                self.cli,
+                url,
+                rich_content_path,
+            )
+            if not applied:
+                return {
+                    "status": "import_failed",
+                    "doc_url": url,
+                    "ticket": ticket,
+                    "rich_format_applied": False,
+                    "error": "document_rich_format_failed: " + str(error),
+                }
+        result = self._fetch_document(url)
+        result["ticket"] = ticket
+        if rich_content_path is not None:
+            result["rich_format_applied"] = True
+        return result
+
+    def _poll_ticket(
+        self,
+        ticket: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + self.config.task_timeout_seconds
         while time.monotonic() < deadline:
             response = self.cli.run(
@@ -301,7 +332,7 @@ class OnlineFeishuImporter:
             )
             url = find_url(response.payload)
             if response.ok and url:
-                return self._fetch_document(url)
+                return self._finalize_document(url, ticket, rich_content_path)
             if response.ok:
                 state = find_string(response.payload, {"status", "state"})
                 if state and state.casefold() in {"failed", "error", "canceled", "cancelled"}:
@@ -324,7 +355,12 @@ class OnlineFeishuImporter:
             "error": "import task did not return a document URL before timeout; confirm the target folder manually",
         }
 
-    def import_and_readback(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def import_and_readback(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         args = [
             "drive",
             "+import",
@@ -348,11 +384,9 @@ class OnlineFeishuImporter:
         url = find_url(response.payload)
         ticket = find_ticket(response.payload)
         if url:
-            result = self._fetch_document(url)
-            result["ticket"] = ticket
-            return result
+            return self._finalize_document(url, ticket, rich_content_path)
         if ticket:
-            return self._poll_ticket(ticket)
+            return self._poll_ticket(ticket, rich_content_path)
         if not response.ok and is_transient(response.diagnostic):
             return {
                 "status": "import_pending",
@@ -379,6 +413,8 @@ def _entry_for_item(item: dict[str, Any], *, status: str, result: dict[str, Any]
         "candidate_id": item.get("candidate_id"),
         "markdown_path": item.get("markdown_path"),
         "cleaned_markdown_path": item.get("cleaned_markdown_path"),
+        "rich_content_path": item.get("rich_content_path"),
+        "rich_format_applied": result.get("rich_format_applied", item.get("rich_format_applied")),
         "doc_url": result.get("doc_url") or item.get("doc_url"),
         "ticket": result.get("ticket") or item.get("ticket"),
         "readback_nonempty": result.get("readback_nonempty", item.get("readback_nonempty")),
@@ -400,6 +436,8 @@ def _item_from_entry(item: dict[str, Any], entry: dict[str, Any], reason: str) -
                 "candidate_id",
                 "markdown_path",
                 "cleaned_markdown_path",
+                "rich_content_path",
+                "rich_format_applied",
                 "doc_url",
                 "ticket",
                 "readback_nonempty",
@@ -510,6 +548,8 @@ def _base_item(path: Path, candidate_name: str) -> dict[str, Any]:
         "status": "pending",
         "markdown_path": None,
         "cleaned_markdown_path": None,
+        "rich_content_path": None,
+        "rich_format_applied": None,
         "doc_url": None,
         "ticket": None,
         "readback_nonempty": None,
@@ -733,6 +773,8 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
             )
             item["markdown_path"] = str(Path(prepared["markdown_path"]).resolve())
             item["cleaned_markdown_path"] = str(Path(prepared["cleaned_markdown_path"]).resolve())
+            if prepared.get("rich_content_path"):
+                item["rich_content_path"] = str(Path(prepared["rich_content_path"]).resolve())
             item["markdown_chars"] = prepared.get("markdown_chars")
             item["page_count"] = prepared.get("page_count")
             item["used_ocr"] = prepared.get("used_ocr")
@@ -758,11 +800,18 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
             )
             _write_json(config.state_path, state)
             assert importer is not None
-            result = importer.import_and_readback(
-                Path(item["markdown_path"]),
-                f"{candidate_name}-简历",
-            )
-            item.update({key: result.get(key) for key in ("doc_url", "ticket", "readback_nonempty", "readback_chars", "import_outcome_uncertain", "error")})
+            if item.get("rich_content_path"):
+                result = importer.import_and_readback(
+                    Path(item["markdown_path"]),
+                    f"{candidate_name}-简历",
+                    Path(item["rich_content_path"]),
+                )
+            else:
+                result = importer.import_and_readback(
+                    Path(item["markdown_path"]),
+                    f"{candidate_name}-简历",
+                )
+            item.update({key: result.get(key) for key in ("doc_url", "ticket", "readback_nonempty", "readback_chars", "import_outcome_uncertain", "rich_format_applied", "error")})
             item["status"] = str(result.get("status") or "import_failed")
             state["entries"][source_hash] = _entry_for_item(item, status=item["status"], result=result)
             if item["status"] == "success" and item.get("doc_url") and item.get("readback_nonempty"):
