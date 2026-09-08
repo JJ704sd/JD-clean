@@ -2,7 +2,7 @@
 
 ## 打开使用
 
-Windows：解压完整压缩包，双击 ResumeDesk/ResumeDesk.exe。不能只复制 exe；同目录 _internal 包含运行时与 OCR 模型。无需安装 Python、uv 或填写 API。
+Windows：可以解压完整压缩包后双击 `ResumeDesk/ResumeDesk.exe`，也可以直接双击 `ResumeDesk-0.2.0-preview-windows-x64-onefile.exe`。单文件版本不需要解压，但首次启动会先自解压，启动速度慢于目录版；两种版本都无需安装 Python、uv 或填写 API。
 
 Mac：使用对应芯片构建的 ResumeDesk.app，复制到个人 Applications 后打开。当前 Windows 构建不包含 Mac 成品；Mac 构建与签名验证完成前，不宣称已支持用户设备。
 

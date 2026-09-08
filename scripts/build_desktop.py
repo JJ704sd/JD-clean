@@ -22,9 +22,16 @@ def main():
         action="store_true",
         help="developer-only, artifact marked unverified",
     )
+    parser.add_argument(
+        "--onefile",
+        action="store_true",
+        help="Windows only: emit a directly launchable single executable",
+    )
     args = parser.parse_args()
     if sys.platform not in ("win32", "darwin"):
         raise SystemExit("Build on Windows or macOS using native Python 3.12")
+    if args.onefile and sys.platform != "win32":
+        raise SystemExit("--onefile is currently supported on Windows only")
     if sys.platform == "darwin" and int(platform.mac_ver()[0].split(".")[0]) < 14:
         raise SystemExit("The locked native dependencies require macOS 14 or newer")
     # Build-time initialization fetches upstream checksum-verified models when absent.
@@ -69,6 +76,7 @@ def main():
         "python": platform.python_version(),
         "dependencies": versions,
         "signed": False,
+        "packaging": "onefile" if args.onefile else "onedir",
         "models": {
             p.name: hashlib.sha256(p.read_bytes()).hexdigest()
             for p in models.glob("*.onnx")
@@ -83,7 +91,7 @@ def main():
         "PyInstaller",
         "--noconfirm",
         "--windowed",
-        "--onedir",
+        "--onefile" if args.onefile else "--onedir",
         "--name",
         "ResumeDesk",
         "--paths",
@@ -126,10 +134,15 @@ def main():
         [*command, str(ROOT / "scripts/desktop_entry.py")], check=True, cwd=ROOT
     )
     app = (
-        ROOT / "dist" / ("ResumeDesk" if sys.platform == "win32" else "ResumeDesk.app")
+        ROOT / "dist" / ("ResumeDesk.exe" if args.onefile else "ResumeDesk")
+        if sys.platform == "win32"
+        else ROOT / "dist" / "ResumeDesk.app"
     )
-    executable = app / (
-        "ResumeDesk.exe" if sys.platform == "win32" else "Contents/MacOS/ResumeDesk"
+    executable = (
+        app
+        if args.onefile
+        else app
+        / ("ResumeDesk.exe" if sys.platform == "win32" else "Contents/MacOS/ResumeDesk")
     )
     report = build / "packaged-smoke.json"
     if not args.skip_smoke:
@@ -146,6 +159,18 @@ def main():
             or not json.loads(report.read_text(encoding="utf-8")).get("passed")
         ):
             raise SystemExit(f"Packaged smoke test failed. Inspect {report}")
+    if args.onefile:
+        output = release / "ResumeDesk-0.2.0-preview-windows-x64-onefile.exe"
+        shutil.copy2(executable, output)
+        checksum = hashlib.sha256(output.read_bytes()).hexdigest()
+        output.with_suffix(".sha256").write_text(
+            f"{checksum}  {output.name}\n", encoding="utf-8"
+        )
+        print(
+            f"Built {output}; unsigned preview; smoke {'NOT RUN' if args.skip_smoke else 'passed'}"
+        )
+        return
+
     label = "windows-x64" if sys.platform == "win32" else "macos-" + platform.machine()
     archive_name = release / ("ResumeDesk-0.2.0-preview-" + label)
     if sys.platform == "darwin":
