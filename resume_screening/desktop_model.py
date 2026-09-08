@@ -31,10 +31,7 @@ class ModelConfig:
     base_url: str = ""
     model: str = ""
 
-    @property
-    def endpoint(self):
-        if self.provider not in ("openai-compatible", "minimax"):
-            raise ValueError("未知模型协议")
+    def _validated_base(self):
         base = self.base_url.strip().rstrip("/")
         parsed = urlsplit(base)
         if (
@@ -46,6 +43,13 @@ class ModelConfig:
             or parsed.fragment
         ):
             raise ValueError("请填写不含凭据、查询参数或片段的 HTTPS Base URL")
+        return base
+
+    @property
+    def endpoint(self):
+        if self.provider not in ("openai-compatible", "minimax"):
+            raise ValueError("未知模型协议")
+        base = self._validated_base()
         if not self.model.strip():
             raise ValueError("请填写模型名称")
         suffix = (
@@ -54,6 +58,19 @@ class ModelConfig:
             else "/text/chatcompletion_v2"
         )
         return base if base.endswith(suffix) else base + suffix
+
+    @property
+    def models_endpoint(self):
+        """Return the conventional model-list endpoint for this provider."""
+
+        if self.provider not in ("openai-compatible", "minimax"):
+            raise ValueError("未知模型协议")
+        base = self._validated_base()
+        for suffix in ("/chat/completions", "/text/chatcompletion_v2"):
+            if base.casefold().endswith(suffix.casefold()):
+                base = base[: -len(suffix)]
+                break
+        return base.rstrip("/") + "/models"
 
     @property
     def identity(self):
@@ -120,6 +137,26 @@ def configured_client(config, key=""):
     if not value:
         raise ValueError("未配置 API Key；可继续本地整理")
     return DesktopModelClient(config, value)
+
+
+def list_models(config, key=""):
+    """Fetch provider models using an explicit key or the saved OS credential."""
+
+    value = key.strip() or credential_backend().get_password(
+        "ResumeDesk", config.identity
+    )
+    if not value:
+        raise ValueError("未配置 API Key；请先填写并保存或测试连接")
+    return DesktopModelClient(config, value).list_models()
+
+
+def saved_credential_available(config: ModelConfig) -> bool:
+    """Return whether the OS credential store has a key for this config."""
+
+    try:
+        return bool(credential_backend().get_password("ResumeDesk", config.identity))
+    except Exception:  # noqa: BLE001 -- status display must not block local use.
+        return False
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -201,6 +238,41 @@ class DesktopModelClient:
                 "模型响应为空、截断或格式无效；不自动补发修复请求"
             ) from None
 
+    def list_models(self):
+        """Fetch model IDs from a provider's conventional ``/models`` endpoint."""
+
+        request = urllib.request.Request(
+            self.config.models_endpoint,
+            headers={
+                "Accept": "application/json",
+                "Authorization": "Bearer " + self.key,
+            },
+            method="GET",
+        )
+        try:
+            with self.opener.open(request, timeout=30) as response:
+                body = response.read(4 * 1024 * 1024 + 1)
+                if len(body) > 4 * 1024 * 1024:
+                    raise ValueError("模型列表响应过大，请手动填写模型名称")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                raise ValueError("模型列表认证失败，请检查 API Key") from None
+            if exc.code == 404:
+                raise ValueError("该 Base URL 未提供 /models 接口，请手动填写模型名称") from None
+            if exc.code == 429:
+                raise ValueError("模型列表请求被限流，请稍后重试") from None
+            raise ValueError(f"模型列表请求失败（HTTP {exc.code}），请检查 Base URL") from None
+        except (TimeoutError, urllib.error.URLError, OSError):
+            raise ValueError("模型列表获取失败，请检查网络和 Base URL") from None
+        try:
+            payload = json.loads(body)
+        except (TypeError, ValueError):
+            raise ValueError("模型列表响应不是有效 JSON，请手动填写模型名称") from None
+        models = _extract_model_names(payload)
+        if not models:
+            raise ValueError("模型列表为空或格式不兼容，请手动填写模型名称")
+        return models
+
     def test(self):
         response = self.analyze(
             system_prompt='只返回 JSON 对象 {"ok":true}',
@@ -213,6 +285,44 @@ class DesktopModelClient:
         if not valid:
             raise ValueError("连接成功，但模型未按测试要求返回 JSON；请检查模型兼容性")
         return "连接和 JSON 测试通过；实际简历判断仍需人工校准"
+
+
+def _extract_model_names(payload):
+    """Extract model IDs from common OpenAI-compatible response shapes."""
+
+    values = []
+    if isinstance(payload, list):
+        values = payload
+    elif isinstance(payload, dict):
+        for key in ("data", "models", "items", "result"):
+            candidate = payload.get(key)
+            if isinstance(candidate, list):
+                values = candidate
+                break
+            if isinstance(candidate, dict):
+                values = candidate.get("data") or candidate.get("models") or []
+                if isinstance(values, list):
+                    break
+    names = []
+    seen = set()
+    for value in values:
+        if isinstance(value, str):
+            name = value.strip()
+        elif isinstance(value, dict):
+            name = next(
+                (
+                    str(value[key]).strip()
+                    for key in ("id", "name", "model", "model_name")
+                    if value.get(key)
+                ),
+                "",
+            )
+        else:
+            name = ""
+        if name and name.casefold() not in seen:
+            seen.add(name.casefold())
+            names.append(name)
+    return names
 
 
 def run_analysis(store: ReviewStore, document_id, config: ModelConfig, client):

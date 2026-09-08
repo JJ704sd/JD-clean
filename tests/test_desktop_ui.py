@@ -69,6 +69,29 @@ class DesktopUITests(unittest.TestCase):
         self.assertEqual(draft["reviewer"], "草稿审阅者")
         self.assertIn("稍后核对", draft["evidence"])
 
+    def test_document_filters_can_be_changed_from_dropdowns(self):
+        senior = self.directory / "senior.txt"
+        intern = self.directory / "intern.txt"
+        failed = self.directory / "failed.txt"
+        senior.write_text(TEXT, encoding="utf-8")
+        intern.write_text(TEXT + "\nIntern project evidence.", encoding="utf-8")
+        failed.write_text("too short", encoding="utf-8")
+        senior_row = self.app.store.prepare(senior, "senior-fullstack-engineer")
+        intern_row = self.app.store.prepare(intern, "fullstack-development-intern")
+        failed_row = self.app.store.prepare(failed, "senior-fullstack-engineer")
+        self.app.refresh()
+        self.assertEqual(len(self.app.documents.get_children()), 3)
+
+        self.app.filter_role.set("全栈开发实习生")
+        self.window.update()
+        self.assertEqual(self.app.documents.get_children(), (intern_row["id"],))
+
+        self.app.filter_role.set("全部岗位")
+        self.app.filter_status.set("解析失败")
+        self.window.update()
+        self.assertEqual(self.app.documents.get_children(), (failed_row["id"],))
+        self.assertNotIn(senior_row["id"], self.app.documents.get_children())
+
     def test_analyze_selected_batch_and_reports_each_run(self):
         first = self.directory / "first.txt"
         second = self.directory / "second.txt"

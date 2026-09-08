@@ -22,9 +22,11 @@ from .cleaning import SUPPORTED_SUFFIXES
 from .desktop_model import (
     ModelConfig,
     configured_client,
+    list_models,
     load_config,
     run_analysis,
     save_config,
+    saved_credential_available,
 )
 from .desktop_store import (
     DECISIONS,
@@ -182,6 +184,33 @@ class DesktopApp:
             self.documents.column(key, width=width)
         self.documents.pack(fill="x", pady=10)
         self.documents.bind("<<TreeviewSelect>>", self.select_document)
+        filters = ttk.Frame(self.tasks)
+        filters.pack(fill="x", pady=(0, 4))
+        ttk.Label(filters, text="筛选岗位").pack(side="left")
+        self.filter_role = tk.StringVar(value="全部岗位")
+        ttk.Combobox(
+            filters,
+            textvariable=self.filter_role,
+            values=["全部岗位", *ROLES.values()],
+            state="readonly",
+            width=18,
+        ).pack(side="left", padx=(5, 12))
+        ttk.Label(filters, text="筛选状态").pack(side="left")
+        self.filter_status = tk.StringVar(value="全部状态")
+        ttk.Combobox(
+            filters,
+            textvariable=self.filter_status,
+            values=["全部状态", "整理中", "待人工审阅", "人工审阅完成", "解析失败"],
+            state="readonly",
+            width=16,
+        ).pack(side="left", padx=5)
+        for variable in (self.filter_role, self.filter_status):
+            variable.trace_add("write", lambda *_: self.refresh())
+        ttk.Button(
+            filters,
+            text="清除筛选",
+            command=lambda: (self.filter_role.set("全部岗位"), self.filter_status.set("全部状态")),
+        ).pack(side="left", padx=5)
         actions = ttk.Frame(self.tasks)
         actions.pack(fill="x")
         self.search = tk.StringVar()
@@ -269,6 +298,11 @@ class DesktopApp:
         self.base = tk.StringVar(value=config.base_url)
         self.model = tk.StringVar(value=config.model)
         self.key = tk.StringVar()
+        self.model_options = [config.model] if config.model else []
+        self.model_status = tk.StringVar(
+            value=""
+        )
+        self.key_status = tk.StringVar()
         form = ttk.Frame(self.settings)
         form.pack(anchor="w", fill="x")
         for index, (label, var) in enumerate(
@@ -290,14 +324,37 @@ class DesktopApp:
                     state="readonly",
                     width=62,
                 )
+            elif index == 2:
+                holder = ttk.Frame(form)
+                self.model_widget = ttk.Combobox(
+                    holder,
+                    textvariable=var,
+                    values=self.model_options,
+                    state="normal",
+                    width=47,
+                )
+                self.model_widget.pack(side="left")
+                ttk.Button(
+                    holder,
+                    text="获取模型列表",
+                    command=self.discover_models,
+                ).pack(side="left", padx=(8, 0))
+                holder.grid(row=index, column=1, sticky="w")
+                continue
             else:
                 widget = ttk.Entry(
                     form, textvariable=var, width=65, show="•" if index == 3 else ""
                 )
             widget.grid(row=index, column=1, sticky="w")
+        ttk.Label(self.settings, textvariable=self.model_status).pack(
+            anchor="w", pady=(2, 0)
+        )
+        ttk.Label(self.settings, textvariable=self.key_status).pack(
+            anchor="w", pady=(2, 0)
+        )
         ttk.Label(
             self.settings,
-            text="Base URL 通常以 /v1 结尾。Key 留空可使用已保存凭据；更换端点需重新填写。\n密钥保存到系统凭据库，不写入普通配置和导出。",
+            text="Base URL 通常以 /v1 结尾。点击“获取模型列表”可读取兼容接口的 /models；不支持发现时仍可手动填写。\nKey 留空可使用已保存凭据；首次测试或 AI 分析时输入的 Key 也会自动保存。密钥只写入系统凭据库，不写入普通配置和导出。",
             wraplength=950,
         ).pack(anchor="w", pady=12)
         bar = ttk.Frame(self.settings)
@@ -332,6 +389,7 @@ class DesktopApp:
         ttk.Button(self.settings, text="从备份恢复审阅数据", command=self.restore_data).pack(
             anchor="w", pady=3
         )
+        self.refresh_key_status()
 
     def make_history(self):
         ttk.Label(
@@ -395,6 +453,9 @@ class DesktopApp:
                 break
             if kind == "reset":
                 self.reset_review()
+                continue
+            if kind == "models":
+                self.apply_discovered_models(value)
                 continue
             self.status.set(value)
             if kind == "progress":
@@ -521,6 +582,17 @@ class DesktopApp:
     def refresh(self):
         existing = set(self.documents.get_children())
         records = self.store.list_documents()
+        role_filter = self.filter_role.get()
+        status_filter = self.filter_status.get()
+        role_code = next(
+            (key for key, value in ROLES.items() if value == role_filter), None
+        )
+        if role_code:
+            records = [record for record in records if record["role"] == role_code]
+        if status_filter != "全部状态":
+            records = [
+                record for record in records if record["status"] == status_filter
+            ]
         active = {record["id"] for record in records}
         for document_id in existing - active:
             self.documents.delete(document_id)
@@ -733,10 +805,75 @@ class DesktopApp:
             self.provider.get(), self.base.get().strip(), self.model.get().strip()
         )
 
+    def refresh_key_status(self, config=None):
+        try:
+            config = config or self.model_config()
+            _ = config.models_endpoint
+            if saved_credential_available(config):
+                self.key_status.set("API Key 状态：已安全保存（界面不会回显密钥；输入新 Key 可替换）")
+            else:
+                self.key_status.set("API Key 状态：未保存；点击保存、测试或 AI 分析后会写入系统凭据库")
+        except (ValueError, OSError, TypeError):
+            self.key_status.set("API Key 状态：等待有效的 HTTPS Base URL 和模型配置")
+
+    def persist_entered_key(self, config):
+        """Remember a newly entered key before a paid operation starts."""
+
+        key = self.key.get().strip()
+        if not key:
+            return
+        save_config(self.store.root, config, key)
+        self.key.set("")
+        self.refresh_key_status(config)
+
+    def apply_discovered_models(self, models):
+        self.model_options = list(models)
+        self.model_widget.configure(values=self.model_options)
+        if not self.model.get().strip():
+            self.model.set(self.model_options[0])
+        if self.key.get().strip():
+            try:
+                self.persist_entered_key(self.model_config())
+            except (OSError, TypeError, ValueError):
+                # Keep the entered key visible so the user can save it explicitly.
+                pass
+        self.model_status.set(f"已获取 {len(self.model_options)} 个可用模型；可下拉选择，也可手动填写。")
+
+    def discover_models(self):
+        if self.busy:
+            return
+        try:
+            config = self.model_config()
+            _ = config.models_endpoint
+        except ValueError as exc:
+            messagebox.showinfo("无法获取模型", str(exc))
+            return
+        key = self.key.get().strip()
+        if config.model.strip():
+            try:
+                self.persist_entered_key(config)
+            except Exception as exc:  # noqa: BLE001 -- OS keychain errors must not leak credential arguments.
+                messagebox.showerror(
+                    "API Key 未保存",
+                    str(exc)
+                    if isinstance(exc, ValueError)
+                    else "系统凭据库不可用，请检查系统权限",
+                )
+                return
+
+        def work():
+            models = list_models(config, key)
+            self.events.put(("models", models))
+            return f"已获取 {len(models)} 个可用模型。"
+
+        self.start_job(work)
+
     def save_model(self):
         try:
-            save_config(self.store.root, self.model_config(), self.key.get())
+            config = self.model_config()
+            save_config(self.store.root, config, self.key.get())
             self.key.set("")
+            self.refresh_key_status(config)
             self.status.set("配置已保存，密钥存入系统凭据库。")
         except Exception as exc:  # noqa: BLE001 -- OS keychain errors must not leak credential arguments.
             messagebox.showerror(
@@ -751,8 +888,19 @@ class DesktopApp:
             "连接测试", "将发送合成短文本，可能产生少量 API 费用。是否测试？"
         ):
             return
-        config, key = self.model_config(), self.key.get()
-        self.start_job(lambda: configured_client(config, key).test())
+        config, key = self.model_config(), self.key.get().strip()
+        try:
+            self.persist_entered_key(config)
+            configured_client(config, key)
+        except Exception as exc:  # noqa: BLE001 -- keep provider credentials out of UI errors.
+            messagebox.showerror(
+                "无法测试模型",
+                str(exc)
+                if isinstance(exc, ValueError)
+                else "模型配置或系统凭据不可用，请检查设置",
+            )
+            return
+        self.start_job(lambda: configured_client(config).test())
 
     def analyze(self):
         if self.busy:
@@ -763,7 +911,7 @@ class DesktopApp:
         if not selected:
             messagebox.showinfo("未选择材料", "请先选择一份或多份已整理成功的材料。")
             return
-        config, key = self.model_config(), self.key.get()
+        config, key = self.model_config(), self.key.get().strip()
         try:
             _ = config.endpoint
         except ValueError as exc:
@@ -808,9 +956,20 @@ class DesktopApp:
             "将发送选中材料的脱敏文本并产生 API 费用。是否继续？",
         ):
             return
+        try:
+            self.persist_entered_key(config)
+            configured_client(config, key)
+        except Exception as exc:  # noqa: BLE001 -- keep provider credentials out of UI errors.
+            messagebox.showerror(
+                "无法开始 AI 分析",
+                str(exc)
+                if isinstance(exc, ValueError)
+                else "模型配置或系统凭据不可用，请检查设置",
+            )
+            return
 
         def work():
-            client = configured_client(config, key)
+            client = configured_client(config)
             counts = {}
             errors = []
             completed = 0

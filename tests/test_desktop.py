@@ -15,6 +15,8 @@ from resume_screening.desktop_model import (
     DesktopModelClient,
     ModelConfig,
     NoRedirect,
+    _extract_model_names,
+    configured_client,
     run_analysis,
 )
 from resume_screening.desktop_smoke import TEXT
@@ -253,6 +255,53 @@ class ReviewTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
+    def test_model_list_endpoint_and_common_response_shapes(self):
+        config = ModelConfig(
+            "openai-compatible", "https://example.invalid/v1", "fixture"
+        )
+        self.assertEqual(config.models_endpoint, "https://example.invalid/v1/models")
+        self.assertEqual(
+            _extract_model_names(
+                {
+                    "data": [
+                        {"id": "model-a"},
+                        {"name": "model-b"},
+                        {"id": "MODEL-A"},
+                    ]
+                }
+            ),
+            ["model-a", "model-b"],
+        )
+
+    def test_list_models_uses_bearer_key_and_returns_ids(self):
+        config = ModelConfig(
+            "openai-compatible", "https://example.invalid/v1", "fixture"
+        )
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(
+            json.dumps({"data": [{"id": "model-a"}, {"id": "model-b"}]}).encode()
+        )
+        client = DesktopModelClient(config, "short-secret", opener=opener)
+        self.assertEqual(client.list_models(), ["model-a", "model-b"])
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://example.invalid/v1/models")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(request.get_header("Authorization"), "Bearer short-secret")
+
+    def test_configured_client_loads_persisted_key_when_ui_field_is_blank(self):
+        config = ModelConfig(
+            "openai-compatible", "https://example.invalid/v1", "fixture"
+        )
+        backend = Mock()
+        backend.get_password.return_value = "saved-secret"
+        with patch(
+            "resume_screening.desktop_model.credential_backend",
+            return_value=backend,
+        ):
+            client = configured_client(config)
+        self.assertEqual(client.key, "saved-secret")
+        backend.get_password.assert_called_once_with("ResumeDesk", config.identity)
+
     def test_minimax_native_envelope_and_business_error(self):
         config = ModelConfig("minimax", "https://example.invalid/v1", "fixture")
         opener = Mock()
@@ -292,6 +341,24 @@ class ModelTests(unittest.TestCase):
             backend.set_password.assert_called_once_with(
                 "ResumeDesk", config.identity, "synthetic-secret"
             )
+
+    def test_config_save_keeps_existing_credential_when_key_field_is_blank(self):
+        from resume_screening.desktop_model import save_config
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = ModelConfig(
+                "openai-compatible", "https://example.invalid/v1", "fixture"
+            )
+            backend = Mock()
+            backend.get_password.return_value = "already-saved"
+            with patch(
+                "resume_screening.desktop_model.credential_backend",
+                return_value=backend,
+            ):
+                save_config(root, config, "")
+            backend.set_password.assert_not_called()
+            self.assertEqual(json.loads((root / "model.json").read_text())["model"], "fixture")
 
     def client(self, body):
         opener = Mock()
