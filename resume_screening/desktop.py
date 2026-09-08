@@ -303,6 +303,8 @@ class DesktopApp:
             value=""
         )
         self.key_status = tk.StringVar()
+        for variable in (self.provider, self.base, self.model):
+            variable.trace_add("write", lambda *_: self.refresh_key_status())
         form = ttk.Frame(self.settings)
         form.pack(anchor="w", fill="x")
         for index, (label, var) in enumerate(
