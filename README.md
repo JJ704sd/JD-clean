@@ -1,5 +1,11 @@
 # 简历清洗与证据化初筛
 
+## 桌面预览版
+
+新增中文桌面入口，支持无 API 的本地整理、人工审阅与导出，以及可选模型 API 和飞书文档同步。运行 `uv run --locked python -m resume_screening.desktop`；构建独立包使用 `uv run --locked --group build python scripts/build_desktop.py`。
+
+使用及平台限制见 [桌面使用说明](docs/desktop-user-guide.md)，需求见 [桌面 spec](docs/one-click-app-spec.md) 与 [无 API 保底 spec](docs/no-api-fallback-spec.md)。桌面数据与下述原 CLI 数据隔离，不读取项目 `.env`。
+
 这是一个以 Python 为主的可恢复简历初筛工具。每份简历先在本地转换为可追溯 Markdown，再将脱敏后的单份简历连同对应岗位 skill 一次性发送给 `MiniMax-M3`。模型只负责逐项取证，分数和 A–E 档由 Python 按固定规则计算；watch 模式负责下载目录分流、稳定性保护、人工复核队列和后台健康状态。
 
 支持的岗位：

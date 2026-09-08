@@ -9,3 +9,6 @@ venv/
 var/
 outputs/
 exports/
+build/
+dist/
+release/
