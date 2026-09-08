@@ -78,6 +78,20 @@ class ModelConfig:
             json.dumps(asdict(self), sort_keys=True).encode()
         ).hexdigest()
 
+    @property
+    def credential_identity(self):
+        """Stable OS-keychain identity shared by models on one endpoint."""
+
+        return hashlib.sha256(
+            json.dumps(
+                {
+                    "provider": self.provider,
+                    "base_url": self.base_url.strip().rstrip("/"),
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+
 
 @dataclass(frozen=True)
 class AnalysisResult:
@@ -111,9 +125,12 @@ def credential_backend():
 def save_config(root: Path, config: ModelConfig, key: str):
     _ = config.endpoint
     backend = credential_backend()
-    if key.strip():
-        backend.set_password("ResumeDesk", config.identity, key.strip())
-    elif not backend.get_password("ResumeDesk", config.identity):
+    value = key.strip()
+    if value:
+        backend.set_password("ResumeDesk", config.credential_identity, value)
+    else:
+        value = _saved_credential(backend, config)
+    if not value:
         raise ValueError("请填写 API Key")
     atomic_text(
         root / "model.json", json.dumps(asdict(config), ensure_ascii=False, indent=2)
@@ -131,9 +148,7 @@ def load_config(root: Path):
 
 def configured_client(config, key=""):
     _ = config.endpoint
-    value = key.strip() or credential_backend().get_password(
-        "ResumeDesk", config.identity
-    )
+    value = key.strip() or _saved_credential(credential_backend(), config)
     if not value:
         raise ValueError("未配置 API Key；可继续本地整理")
     return DesktopModelClient(config, value)
@@ -142,9 +157,7 @@ def configured_client(config, key=""):
 def list_models(config, key=""):
     """Fetch provider models using an explicit key or the saved OS credential."""
 
-    value = key.strip() or credential_backend().get_password(
-        "ResumeDesk", config.identity
-    )
+    value = key.strip() or _saved_credential(credential_backend(), config)
     if not value:
         raise ValueError("未配置 API Key；请先填写并保存或测试连接")
     return DesktopModelClient(config, value).list_models()
@@ -154,9 +167,24 @@ def saved_credential_available(config: ModelConfig) -> bool:
     """Return whether the OS credential store has a key for this config."""
 
     try:
-        return bool(credential_backend().get_password("ResumeDesk", config.identity))
+        return bool(_saved_credential(credential_backend(), config))
     except Exception:  # noqa: BLE001 -- status display must not block local use.
         return False
+
+
+def _saved_credential(backend, config: ModelConfig):
+    """Read the endpoint-scoped key and migrate the prior model-scoped key."""
+
+    value = backend.get_password("ResumeDesk", config.credential_identity)
+    if value:
+        return value
+    legacy = backend.get_password("ResumeDesk", config.identity)
+    if legacy:
+        try:
+            backend.set_password("ResumeDesk", config.credential_identity, legacy)
+        except Exception:  # noqa: BLE001 -- legacy read still remains usable.
+            return legacy
+    return legacy
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

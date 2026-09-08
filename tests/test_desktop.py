@@ -300,7 +300,27 @@ class ModelTests(unittest.TestCase):
         ):
             client = configured_client(config)
         self.assertEqual(client.key, "saved-secret")
-        backend.get_password.assert_called_once_with("ResumeDesk", config.identity)
+        backend.get_password.assert_called_once_with(
+            "ResumeDesk", config.credential_identity
+        )
+
+    def test_saved_key_is_reused_when_model_changes_on_same_endpoint(self):
+        first = ModelConfig(
+            "openai-compatible", "https://example.invalid/v1", "model-a"
+        )
+        second = ModelConfig(
+            "openai-compatible", "https://example.invalid/v1", "model-b"
+        )
+        backend = Mock()
+        backend.get_password.side_effect = lambda service, identity: (
+            "saved-secret" if identity == first.credential_identity else None
+        )
+        with patch(
+            "resume_screening.desktop_model.credential_backend",
+            return_value=backend,
+        ):
+            client = configured_client(second)
+        self.assertEqual(client.key, "saved-secret")
 
     def test_minimax_native_envelope_and_business_error(self):
         config = ModelConfig("minimax", "https://example.invalid/v1", "fixture")
@@ -339,7 +359,7 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(load_config(root), config)
             self.assertNotIn("synthetic-secret", (root / "model.json").read_text())
             backend.set_password.assert_called_once_with(
-                "ResumeDesk", config.identity, "synthetic-secret"
+                "ResumeDesk", config.credential_identity, "synthetic-secret"
             )
 
     def test_config_save_keeps_existing_credential_when_key_field_is_blank(self):

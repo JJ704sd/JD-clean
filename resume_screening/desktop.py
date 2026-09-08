@@ -356,7 +356,7 @@ class DesktopApp:
         )
         ttk.Label(
             self.settings,
-            text="Base URL 通常以 /v1 结尾。点击“获取模型列表”可读取兼容接口的 /models；不支持发现时仍可手动填写。\nKey 留空可使用已保存凭据；首次测试或 AI 分析时输入的 Key 也会自动保存。密钥只写入系统凭据库，不写入普通配置和导出。",
+            text="Base URL 通常以 /v1 结尾。点击“获取模型列表”可读取兼容接口的 /models；不支持发现时仍可手动填写。\nKey 留空可使用已保存凭据；首次测试或 AI 分析时输入的 Key 也会自动保存，同一端点切换模型无需重复填写。密钥只写入系统凭据库，不写入普通配置和导出。",
             wraplength=950,
         ).pack(anchor="w", pady=12)
         bar = ttk.Frame(self.settings)
