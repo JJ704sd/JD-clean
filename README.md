@@ -92,6 +92,20 @@ uv run --locked python -m resume_screening worker --once
 uv run --locked python -m resume_screening worker --once --max-tasks 1
 ```
 
+扫描件、双栏或复杂排版简历可显式使用 MinerU 预处理，以改善 OCR 和版面顺序。该模式会把原文件发送到 MinerU 服务端，只有在获得简历外部处理授权后才能启用；默认本地解析流程不上传文档：
+
+```powershell
+uv run --locked python skills\screen-senior-fullstack-resumes\scripts\prepare_resume.py `
+  "C:\Users\Administrator\Downloads\candidate.pdf" `
+  --candidate-id candidate-001 `
+  --candidate-name 张三 `
+  --parser mineru-flash `
+  --allow-external-processing `
+  --output "var\prepared\candidate-001.md"
+```
+
+MinerU `flash-extract` 无需令牌，但单文件不能超过 10 MB 或 20 页。输出仍会经过项目的质量检查、平台乱码清理和联系方式脱敏，再作为 Markdown 登记筛选；MinerU 不参与评分。未安装 CLI 时先执行 `npm install -g mineru-open-api`。
+
 长期监听（无目录输入时只消费当前数据库队列）：
 
 ```powershell

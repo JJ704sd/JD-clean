@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unicodedata
 import zipfile
 from collections.abc import Callable, Iterable
@@ -14,6 +18,8 @@ from xml.etree import ElementTree
 
 PARSER_VERSION = "resume-cleaner-2026-09-01-v2"
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
+DOCUMENT_PARSERS = {"local", "mineru-flash"}
+MINERU_FLASH_MAX_BYTES = 10 * 1024 * 1024
 
 EMAIL_RE = re.compile(
     r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[\w-]+", re.IGNORECASE | re.UNICODE
@@ -51,6 +57,7 @@ class CleanedResume:
     used_ocr: bool
     page_count: int
     parser_version: str = PARSER_VERSION
+    extraction_engine: str = "local"
 
 
 def _sha256(path: Path) -> str:
@@ -145,6 +152,82 @@ def _read_pdf(
     return pages, used_ocr
 
 
+def _pdf_page_count(path: Path) -> int:
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("PDF 清洗需要安装 pymupdf") from exc
+    try:
+        with pymupdf.open(path) as document:
+            if document.needs_pass:
+                raise ResumeQualityError("PDF 已加密，无法提取文本")
+            return document.page_count
+    except ResumeQualityError:
+        raise
+    except Exception as exc:
+        raise ResumeQualityError(f"PDF 无法读取：{exc}") from exc
+
+
+def _mineru_executable() -> str:
+    candidates = (
+        ("mineru-open-api.cmd", "mineru-open-api.exe", "mineru-open-api")
+        if os.name == "nt"
+        else ("mineru-open-api",)
+    )
+    for candidate in candidates:
+        executable = shutil.which(candidate)
+        if executable:
+            return executable
+    raise ResumeQualityError("未安装 mineru-open-api，无法使用 MinerU 解析")
+
+
+def _run_mineru_flash(path: Path) -> str:
+    if path.stat().st_size > MINERU_FLASH_MAX_BYTES:
+        raise ResumeQualityError("MinerU flash-extract 仅支持不超过 10 MB 的文件")
+    if path.suffix.lower() == ".pdf" and _pdf_page_count(path) > 20:
+        raise ResumeQualityError("MinerU flash-extract 仅支持不超过 20 页的 PDF")
+
+    with tempfile.TemporaryDirectory(prefix="resume-mineru-") as temporary:
+        destination = Path(temporary) / "extracted.md"
+        command = [
+            _mineru_executable(),
+            "flash-extract",
+            str(path),
+            "--language",
+            "ch",
+            "--ocr",
+            "--timeout",
+            "300",
+            "--output",
+            str(destination),
+        ]
+        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=330,
+                check=False,
+                creationflags=creation_flags,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ResumeQualityError("MinerU 文档解析未完成") from exc
+        if completed.returncode != 0:
+            raise ResumeQualityError(
+                f"MinerU 文档解析失败（退出码 {completed.returncode}）"
+            )
+        try:
+            text = destination.read_text(encoding="utf-8-sig").strip()
+        except OSError as exc:
+            raise ResumeQualityError("MinerU 未生成可读取的 Markdown") from exc
+    if not text:
+        raise ResumeQualityError("MinerU 未提取到有效文本")
+    return text
+
+
 def _quality_check(pages: Iterable[str]) -> None:
     values = list(pages)
     combined = "\n".join(values)
@@ -183,6 +266,8 @@ def clean_resume(
     candidate_name: str | None = None,
     ocr: bool = True,
     ocr_image: Callable[[bytes], str] | None = None,
+    document_parser: str = "local",
+    mineru_extract: Callable[[Path], str] | None = None,
 ) -> CleanedResume:
     path = Path(source).resolve()
     if not path.is_file():
@@ -190,16 +275,32 @@ def clean_resume(
     suffix = path.suffix.lower()
     if suffix not in SUPPORTED_SUFFIXES:
         raise ValueError(f"unsupported resume format: {suffix}")
+    if document_parser not in DOCUMENT_PARSERS:
+        raise ValueError(f"unsupported document parser: {document_parser}")
+    if document_parser == "mineru-flash" and suffix not in {".pdf", ".docx"}:
+        raise ValueError("MinerU 解析仅用于 PDF 或 DOCX 简历")
     used_ocr = False
-    if suffix == ".pdf":
+    extraction_engine = "local"
+    mineru_body = False
+    if document_parser == "mineru-flash":
+        extractor = mineru_extract or _run_mineru_flash
+        pages = [_strip_opaque_platform_tokens(extractor(path))]
+        page_count = _pdf_page_count(path) if suffix == ".pdf" else 1
+        used_ocr = suffix == ".pdf"
+        extraction_engine = "mineru-flash"
+        mineru_body = True
+    elif suffix == ".pdf":
         pages, used_ocr = _read_pdf(path, ocr=ocr, ocr_image=ocr_image)
+        page_count = len(pages)
     elif suffix == ".docx":
         pages = _read_docx(path)
+        page_count = len(pages)
     else:
         try:
             pages = [path.read_text(encoding="utf-8-sig")]
         except UnicodeDecodeError as exc:
             raise ResumeQualityError("文本文件不是有效 UTF-8") from exc
+        page_count = len(pages)
     pages = [_strip_opaque_platform_tokens(page) for page in pages]
     _quality_check(pages)
 
@@ -207,7 +308,8 @@ def clean_resume(
     generated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
     body_parts: list[str] = []
     for index, page in enumerate(pages, start=1):
-        body_parts.extend((f"## 第 {index} 页", "", page.strip(), ""))
+        heading = "## MinerU 提取结果" if mineru_body else f"## 第 {index} 页"
+        body_parts.extend((heading, "", page.strip(), ""))
     body = "\n".join(body_parts).rstrip() + "\n"
     redacted_body = redact_for_model(body, candidate_name=candidate_name)
     markdown = (
@@ -215,9 +317,10 @@ def clean_resume(
         f"candidate_id: {candidate_id}\n"
         f"source_sha256: {source_sha256}\n"
         f"parser_version: {PARSER_VERSION}\n"
+        f"extraction_engine: {extraction_engine}\n"
         f"generated_at: {generated_at}\n"
         f"used_ocr: {str(used_ocr).lower()}\n"
-        f"page_count: {len(pages)}\n"
+        f"page_count: {page_count}\n"
         "---\n\n" + redacted_body
     )
     return CleanedResume(
@@ -227,5 +330,6 @@ def clean_resume(
         markdown=markdown,
         model_text=redacted_body,
         used_ocr=used_ocr,
-        page_count=len(pages),
+        page_count=page_count,
+        extraction_engine=extraction_engine,
     )

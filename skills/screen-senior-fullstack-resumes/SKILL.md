@@ -12,6 +12,7 @@ description: "按本科及以上、语言接受度和非外包要求筛选全栈
 1. 读取[岗位画像](references/jd-profile.md)、[筛选 Rubric](references/rubric.md)、[人工审核政策](references/human-review-policy.md)和[结论卡格式](references/conclusion-format.md)。
 2. 仅在用户要求 JSON、批量导出、审计记录或保存结构化文件时读取[输出契约](references/output-contract.md)。边界案例再读取[校准案例](references/decision-examples.md)和[v13 校准记录](references/calibration-notes-v13.md)。
 3. 输入须包含可读取的简历和明确岗位。未提供候选人 ID 时生成稳定的批次内 ID；姓名只用于展示，不参与判断。
+4. 默认使用项目本地解析器。扫描件、双栏或复杂排版导致本地文本不完整时，可在用户明确允许外部处理后使用 MinerU `flash-extract`；它是文本预处理器，不参与评分或结论生成。
 
 ## 硬边界
 
@@ -41,7 +42,7 @@ description: "按本科及以上、语言接受度和非外包要求筛选全栈
 
 ## 执行
 
-1. 检查页面、文本和 OCR 完整性；不可靠时记录 `U01_PARSE_QUALITY`。
+1. 检查页面、文本和 OCR 完整性；不可靠时记录 `U01_PARSE_QUALITY`。不得仅因安装了 MinerU 就上传简历；明确获准后，运行[简历预处理脚本](scripts/prepare_resume.py)并同时传入 `--parser mineru-flash --allow-external-processing`，再把生成的脱敏 Markdown 交给筛选流程。MinerU flash 模式限 10 MB、20 页，失败时停止并报告，不能伪装成本地解析成功。
 2. 按 Rubric 的 9 个 criterion 各生成一条证据，保留最短原文、位置、置信度和五项事实清单；Python 生成 `E0`–`E3`。
 3. Python 生成学历硬门槛和经验匹配信号，再检查明确语言抵触和外包排除信号；学历不满足或任一排除信号成立时生成 `do_not_advance_pending_human`。
 4. 学历为 `unclear` 时进入 `second_review`。年限、物流、独立/核心项目和 AI 信号只影响评分、排序、摘要和追问，不得另设隐形淘汰门槛。
