@@ -131,6 +131,8 @@ def make_advance(skill_dir: str) -> dict:
     )
     make_l2_not_required(record)
     if skill_dir == SENIOR_DIR:
+        set_supported(record, "SEN-EXP-01", "E2")
+        set_supported(record, "SEN-ADM-01", "E1")
         set_supported(record, "SEN-ARCH-01", "E2")
         set_supported(record, "SEN-DOMAIN-01", "E2")
         set_supported(record, "SEN-LEVEL-01", "E3")
@@ -140,11 +142,13 @@ def make_advance(skill_dir: str) -> dict:
         profile["valuable_project_experience"] = "supported"
         profile["qualification_dimensions"] = {
             "education": "met",
-            "logistics": "met",
-            "valuable_project": "met",
         }
         profile["unmet_requirement_count"] = 0
-        profile["language_learning_signal"] = "supported"
+        profile["experience_fit_signal"] = "preferred_3_to_7_years"
+        profile["language_acceptance"] = "no_resistance_evidenced"
+        profile["employment_model"] = "no_outsourcing_evidenced"
+        profile["project_ownership_signal"] = "core_or_independent"
+        profile["ai_bonus_signal"] = "not_evidenced"
     else:
         set_supported(record, "INT-AVAIL-01", "E1")
     return record
@@ -156,6 +160,7 @@ def make_negative(skill_dir: str) -> dict:
     record["recommendation_rationale"] = "存在达到负面建议门禁的明确核心证据缺口。"
     record["recruiter_summary"]["critical_gaps"] = ["核心项目证据不足"]
     if skill_dir == SENIOR_DIR:
+        set_not_evidenced(record, "SEN-ADM-01")
         set_not_evidenced(record, "SEN-BE-01")
         set_not_evidenced(record, "SEN-DOMAIN-01")
         set_not_evidenced(record, "SEN-LEVEL-01")
@@ -164,10 +169,9 @@ def make_negative(skill_dir: str) -> dict:
         record["priority_profile"]["logistics_experience"] = "not_evidenced"
         record["priority_profile"]["refactoring_experience"] = "not_evidenced"
         record["priority_profile"]["valuable_project_experience"] = "not_evidenced"
-        record["priority_profile"]["qualification_dimensions"]["logistics"] = "not_met"
-        record["priority_profile"]["qualification_dimensions"]["valuable_project"] = "not_met"
-        record["priority_profile"]["unmet_requirement_count"] = 2
-        record["priority_profile"]["language_learning_signal"] = "not_evidenced"
+        record["priority_profile"]["qualification_dimensions"]["education"] = "not_met"
+        record["priority_profile"]["unmet_requirement_count"] = 1
+        record["priority_profile"]["project_ownership_signal"] = "not_evidenced"
     else:
         set_not_evidenced(record, "INT-BE-01")
         set_not_evidenced(record, "INT-WEB-01")
@@ -232,7 +236,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                     3,
                 )
                 expected_first_evidence = (
-                    "- 语言转换与学习交付：" if skill_dir == SENIOR_DIR else "- 后端实现："
+                    "- 后端与语言选择：" if skill_dir == SENIOR_DIR else "- 后端实现："
                 )
                 self.assertTrue(evidence_section.startswith(expected_first_evidence))
                 probe_section = output.split("面试优先验证\n\n", 1)[1].split(
@@ -269,7 +273,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                 self.assertIn("共 2 份：建议推进 1，二审 1，暂不推进 0", output)
                 self.assertIn("| 候选人 ID | 初筛建议 |", output)
                 if skill_dir == SENIOR_DIR:
-                    self.assertIn("| 初筛建议 | 语言参考 | 三项筛选 |", output)
+                    self.assertIn("| 初筛建议 | 排除信号 | 硬门槛与评分 |", output)
                 self.assertIn("## 二审队列", output)
                 self.assertEqual(output.count("### 初筛结论｜"), 1)
                 self.assertRegex(output, r"### 初筛结论｜[^\n]*candidate-second")
@@ -306,8 +310,6 @@ class ScreeningValidatorTests(unittest.TestCase):
         senior = make_advance(SENIOR_DIR)
         set_not_evidenced(senior, "SEN-DOMAIN-01")
         senior["priority_profile"]["logistics_experience"] = "not_evidenced"
-        senior["priority_profile"]["qualification_dimensions"]["logistics"] = "not_met"
-        senior["priority_profile"]["unmet_requirement_count"] = 1
         self.assertEqual(SENIOR.validate_record(senior), [])
 
         intern = make_advance(INTERN_DIR)
@@ -530,7 +532,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                 set_not_evidenced(record, admin_id)
                 if skill_dir == SENIOR_DIR:
                     record["priority_profile"]["qualification_dimensions"]["education"] = "not_met"
-                    record["priority_profile"]["unmet_requirement_count"] = 3
+                    record["priority_profile"]["unmet_requirement_count"] = 1
                 self.assertEqual(validator.validate_record(record), [])
 
     def test_skill_relative_links_exist(self):
@@ -941,14 +943,11 @@ class ScreeningValidatorTests(unittest.TestCase):
         senior_advance = make_advance(SENIOR_DIR)
         set_not_evidenced(senior_advance, "SEN-DOMAIN-01")
         senior_advance["priority_profile"]["logistics_experience"] = "not_evidenced"
-        senior_advance["priority_profile"]["qualification_dimensions"]["logistics"] = "not_met"
-        evidence_item(senior_advance, "SEN-LEVEL-01")["confidence"] = "low"
-        senior_advance["priority_profile"]["valuable_project_experience"] = "unclear"
-        senior_advance["priority_profile"]["qualification_dimensions"]["valuable_project"] = "unclear"
-        senior_advance["priority_profile"]["unmet_requirement_count"] = 1
+        evidence_item(senior_advance, "SEN-ADM-01")["confidence"] = "low"
+        senior_advance["priority_profile"]["qualification_dimensions"]["education"] = "unclear"
         self.assertTrue(
             any(
-                "low-confidence decision evidence requires second review" in error
+                "v13 advance requires the education gate" in error
                 for error in SENIOR.validate_record(senior_advance)
             )
         )
@@ -963,13 +962,12 @@ class ScreeningValidatorTests(unittest.TestCase):
         )
 
         senior_negative = make_negative(SENIOR_DIR)
-        evidence_item(senior_negative, "SEN-LEVEL-01")["confidence"] = "low"
-        senior_negative["priority_profile"]["valuable_project_experience"] = "unclear"
-        senior_negative["priority_profile"]["qualification_dimensions"]["valuable_project"] = "unclear"
-        senior_negative["priority_profile"]["unmet_requirement_count"] = 1
+        evidence_item(senior_negative, "SEN-ADM-01")["confidence"] = "low"
+        senior_negative["priority_profile"]["qualification_dimensions"]["education"] = "unclear"
+        senior_negative["priority_profile"]["unmet_requirement_count"] = 0
         self.assertTrue(
             any(
-                "low-confidence negative gate requires second review" in error
+                "unclear v13 education gate requires second review" in error
                 for error in SENIOR.validate_record(senior_negative)
             )
         )
@@ -991,7 +989,7 @@ class ScreeningValidatorTests(unittest.TestCase):
                 record["model_recommendation"] = "do_not_advance_pending_human"
                 errors = validator.validate_record(record)
                 expected = (
-                    "current rubric negative recommendation requires at least two unmet"
+                    "v13 negative recommendation requires education failure or an exclusion signal"
                     if skill_dir == SENIOR_DIR
                     else "negative evidence gate"
                 )
@@ -1002,7 +1000,7 @@ class ScreeningValidatorTests(unittest.TestCase):
             with self.subTest(skill=skill_dir):
                 record = make_negative(skill_dir)
                 criterion_id = (
-                    "SEN-DOMAIN-01" if skill_dir == SENIOR_DIR else "INT-AVAIL-01"
+                    "SEN-ADM-01" if skill_dir == SENIOR_DIR else "INT-AVAIL-01"
                 )
                 item = evidence_item(record, criterion_id)
                 item.update(

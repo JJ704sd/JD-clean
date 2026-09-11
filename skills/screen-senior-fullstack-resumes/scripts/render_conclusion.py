@@ -12,15 +12,15 @@ from typing import Any
 
 ROLE_LABEL = "高级全栈工程师"
 CRITERION_LABELS = {
-    "SEN-EXP-01": "经验与全栈职责",
-    "SEN-BE-01": "语言转换与学习交付",
+    "SEN-EXP-01": "3–7 年经验",
+    "SEN-BE-01": "后端与语言选择",
     "SEN-ARCH-01": "BFF/微服务",
     "SEN-FE-01": "前端独立交付",
     "SEN-DATA-01": "数据与中间件",
-    "SEN-AI-01": "AI 工程化",
+    "SEN-AI-01": "AI 深度使用/产品经验",
     "SEN-DOMAIN-01": "物流领域",
-    "SEN-LEVEL-01": "高含金量项目",
-    "SEN-ADM-01": "学历/专业",
+    "SEN-LEVEL-01": "独立/核心项目",
+    "SEN-ADM-01": "学历",
 }
 EVIDENCE_PRIORITY = {
     criterion: index
@@ -101,6 +101,7 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
     dimensions = profile.get("qualification_dimensions")
     if isinstance(dimensions, dict):
         names = {
+            "experience_range": "3–7 年经验",
             "education": "学历",
             "logistics": "物流",
             "valuable_project": "高含金量项目",
@@ -109,8 +110,36 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
             names["language_learning"] = "语言/学习"
         states = {"met": "满足", "not_met": "不符合", "unclear": "待确认"}
         summary = "；".join(
-            f"{names[key]}{states.get(dimensions.get(key), '无效')}" for key in names
+            f"{names[key]}{states.get(dimensions.get(key), '无效')}"
+            for key in names
+            if key in dimensions
         )
+        if record.get("rubric_version") in {
+            "senior-fullstack-2026-09-11-v12",
+            "senior-fullstack-2026-09-11-v13",
+        }:
+            stack = "；".join(
+                (
+                    "语言抵触" if profile.get("language_acceptance") == "resistant" else "未发现语言抵触",
+                    "外包经历" if profile.get("employment_model") == "outsourcing_evidenced" else "未发现外包经历",
+                )
+            )
+            extras = []
+            experience_fit = profile.get("experience_fit_signal")
+            if experience_fit == "preferred_3_to_7_years":
+                extras.append("经验 3–7 年（20%）")
+            elif experience_fit == "outside_preferred_range":
+                extras.append("经验范围外（降分）")
+            elif experience_fit in {"not_evidenced", "unclear"}:
+                extras.append("经验待核（降分）")
+            if profile.get("project_ownership_signal") == "core_or_independent":
+                extras.append("独立/核心项目")
+            if profile.get("ai_bonus_signal") == "supported":
+                extras.append("AI 加分")
+            if profile.get("logistics_experience") == "supported":
+                extras.append("物流加分")
+            if extras:
+                summary += "；" + "、".join(extras)
         return stack, f"{summary}；不符合 {profile.get('unmet_requirement_count', '?')} 项"
     signals: list[str] = []
     if profile.get("refactoring_experience") == "supported":
@@ -128,6 +157,10 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
 
 def _column_labels(record: dict[str, Any]) -> tuple[str, str]:
     rubric_version = record.get("rubric_version")
+    if rubric_version == "senior-fullstack-2026-09-11-v13":
+        return "排除信号", "硬门槛与评分"
+    if rubric_version == "senior-fullstack-2026-09-11-v12":
+        return "排除信号", "硬门槛与加分"
     if rubric_version == "senior-fullstack-2026-09-04-v11":
         return "语言参考", "三项筛选"
     if rubric_version == "senior-fullstack-2026-09-04-v10":

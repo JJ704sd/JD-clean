@@ -49,6 +49,18 @@ ROLE_WEIGHTS: dict[str, dict[str, int]] = {
     },
 }
 
+V13_SENIOR_WEIGHTS = {
+    "SEN-EXP-01": 20,
+    "SEN-BE-01": 18,
+    "SEN-ARCH-01": 12,
+    "SEN-FE-01": 8,
+    "SEN-DATA-01": 7,
+    "SEN-AI-01": 7,
+    "SEN-DOMAIN-01": 10,
+    "SEN-LEVEL-01": 16,
+    "SEN-ADM-01": 2,
+}
+
 @dataclass(frozen=True)
 class ScoreResult:
     score: int
@@ -102,7 +114,12 @@ def score_record(record: dict[str, Any]) -> ScoreResult:
     by_criterion = {
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
-    weights = ROLE_WEIGHTS[role]
+    weights = (
+        V13_SENIOR_WEIGHTS
+        if role == "senior-fullstack-engineer"
+        and record.get("rubric_version") == "senior-fullstack-2026-09-11-v13"
+        else ROLE_WEIGHTS[role]
+    )
     if set(by_criterion) != set(weights):
         raise ValueError("evidence criteria do not match the approved role weights")
 

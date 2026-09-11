@@ -10,6 +10,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PromptContractTests(unittest.TestCase):
+    def test_senior_v13_prompt_makes_experience_weighted_not_blocking(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-11-v13",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn("评分权重由 10% 提高到 20%", prompt)
+        self.assertIn("不能单独生成暂不推进或二审", prompt)
+        self.assertIn("高级全栈 v13 校准记录", prompt)
+
+    def test_senior_v12_prompt_contains_latest_hard_gates_and_bonus_signals(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn("3 至 7 年", prompt)
+        self.assertIn("语言选择", prompt)
+        self.assertIn("外派驻场", prompt)
+        self.assertIn("独立承担项目", prompt)
+        self.assertIn("AI 深度使用", prompt)
+        self.assertIn("物流经验是高影响排序信号但不是硬门槛", prompt)
+        self.assertIn("高级全栈 v12 校准记录", prompt)
+
     def test_senior_prompt_v6_requests_facts_without_model_strength(self):
         prompt = build_system_prompt(
             ROOT,

@@ -62,6 +62,20 @@ def build_system_prompt(
     skill_root = Path(project_root) / "skills" / skill_dir_name
     sections: list[str] = []
     for relative in relative_files:
+        if (
+            role == "senior-fullstack-engineer"
+            and relative == "references/calibration-notes-v11.md"
+            and rubric_version
+            in {
+                "senior-fullstack-2026-09-11-v12",
+                "senior-fullstack-2026-09-11-v13",
+            }
+        ):
+            relative = (
+                "references/calibration-notes-v13.md"
+                if rubric_version == "senior-fullstack-2026-09-11-v13"
+                else "references/calibration-notes-v12.md"
+            )
         path = skill_root / relative
         sections.append(
             f'<policy-file path="{relative}">\n{path.read_text(encoding="utf-8")}\n</policy-file>'
@@ -97,10 +111,23 @@ def build_system_prompt(
                 "resume-screening-prompt-2026-09-04-v6",
             }
         ):
-            evidence_contract = """- evidence：必须恰好覆盖 rubric 的 9 个 criterion。每项只包含 criterion_id、state、excerpt、location、rationale、confidence、evidence_factors；不得输出 strength，Python 将按事实清单生成 E0-E3。
+            senior_focus = (
+                """- 对 SEN-EXP-01，核对应用研发总年限是否在 3 至 7 年；明确低于 3 年或超过 7 年时使用 directly_not_met。v13 中该维度按 20% 高权重评分，但不能单独触发暂不推进或二审。保留任何明确的人力外包、软件外包、外派驻场或驻场开发原文，供 Python 执行排除规则。
+- 对 SEN-BE-01，保留候选人对语言选择、换语言或转技术栈的明确接受、犹豫、拒绝或抵触原文；不得把未写态度推断为抵触。
+- 对 SEN-LEVEL-01，重点判断是否独立承担项目或属于项目核心开发者；普通参与或只列团队结果不得拔高。
+- 对 SEN-AI-01，区分 AI 深度使用、AI 工程落地和 AI 产品经验；关键词或普通工具使用最多 E1，真实工作流、产品或工程交付至少需要项目背景和个人动作。
+- 物流经验是高影响排序信号但不是硬门槛；没有物流经验不得单独生成暂不推进。"""
+                if rubric_version
+                in {
+                    "senior-fullstack-2026-09-11-v12",
+                    "senior-fullstack-2026-09-11-v13",
+                }
+                else """- 对 SEN-BE-01，区分目标语言项目交付、已完成的转语言/转栈学习交付和单纯“愿意学习”自评；该维度仅用于非阻断参考和面试追问，不进入学历、物流、高含金量项目三项计数。"""
+            )
+            evidence_contract = f"""- evidence：必须恰好覆盖 rubric 的 9 个 criterion。每项只包含 criterion_id、state、excerpt、location、rationale、confidence、evidence_factors；不得输出 strength，Python 将按事实清单生成 E0-E3。
 - evidence_factors 必须包含 project_context、personal_action、method_or_tradeoff、result_scope、verifiable_impact 五个字段；每个字段只能填写简历原文可支持的最短事实，未提供则为 null，不得推断或把同一句空泛描述重复填入多个字段。
 - 对 SEN-LEVEL-01，重点把业务量、使用量/覆盖、个人参与程度和业务复杂度映射到事实字段；至少两类可信事实且有个人动作才可支持高含金量项目。WMS、CRM、VMS/TMS、ERP 等名称本身最多是关键词。
-- 对 SEN-BE-01，区分目标语言项目交付、已完成的转语言/转栈学习交付和单纯“愿意学习”自评；该维度仅用于非阻断参考和面试追问，不进入学历、物流、高含金量项目三项计数。
+{senior_focus}
 - Python 判定：没有可定位事实为 E0；只有关键词/自评为 E1；同时具备项目背景和个人动作才可为 E2；五项事实全部具备才可为 E3，缺一项最多 E2。行政条件按明确原文单独处理。
 - 不得输出 U01、U09、U10、U11；解析质量、明确岗位冲突、rubric版本和指令性内容由 Python 按严格条件生成。"""
             trace_contract = "所有非空证据必须包含最短原文和页码位置；无证据使用 null 原文和位置。"
