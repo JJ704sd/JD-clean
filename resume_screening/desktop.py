@@ -21,6 +21,7 @@ from tkinter.scrolledtext import ScrolledText
 from .cleaning import SUPPORTED_SUFFIXES
 from .desktop_model import (
     ModelConfig,
+    clear_saved_credential,
     configured_client,
     list_models,
     load_config,
@@ -37,8 +38,9 @@ from .desktop_store import (
     resource_root,
 )
 from .watch import WatchScanner, is_ignored_watch_file
+from .versions import APP_VERSION, AI_OUTPUT_CONTRACT_VERSION
 
-VERSION = "0.2.0-preview"
+VERSION = APP_VERSION
 _BATCH_PAUSE_ERROR_CODES = frozenset(
     {"PROVIDER_AUTH_FAILED", "PROVIDER_RATE_LIMITED"}
 )
@@ -87,6 +89,16 @@ class DesktopApp:
         self.busy = False
         self.stop = threading.Event()
         self.exit_pending = False
+        self.selected_documents: set[str] = set()
+        self.active_import_batch: str | None = None
+        self.active_ai_batch: str | None = None
+        self.onboarding_dismissed = False
+        self.search_matches: list[str] = []
+        self.search_index = -1
+        self.busy_widgets: list[tk.Widget] = []
+        self.progress_value = tk.IntVar(value=0)
+        self.progress_maximum = tk.IntVar(value=1)
+        self.progress_text = tk.StringVar(value="")
         self.current = None
         self.current_criterion = None
         self.evidence = []
@@ -96,7 +108,7 @@ class DesktopApp:
         self.window.geometry(
             f"{min(1240, window.winfo_screenwidth() - 40)}x{min(760, window.winfo_screenheight() - 100)}+10+10"
         )
-        self.window.minsize(980, 640)
+        self.window.minsize(900, 560)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
         style = ttk.Style(window)
         style.theme_use("clam")
@@ -122,6 +134,17 @@ class DesktopApp:
         ttk.Label(outer, textvariable=self.status, wraplength=1160).pack(
             side="bottom", anchor="w", pady=(8, 0)
         )
+        progress_bar = ttk.Progressbar(
+            outer,
+            mode="determinate",
+            variable=self.progress_value,
+            maximum=1,
+        )
+        self.progress_bar = progress_bar
+        progress_bar.pack(side="bottom", fill="x", pady=(4, 0))
+        ttk.Label(outer, textvariable=self.progress_text).pack(
+            side="bottom", anchor="w", pady=(2, 0)
+        )
         self.tabs = ttk.Notebook(outer)
         self.tabs.pack(fill="both", expand=True)
         self.tasks = ttk.Frame(self.tabs, padding=10)
@@ -140,6 +163,11 @@ class DesktopApp:
         self.make_history()
         self.make_feishu()
         self.refresh()
+        self.window.bind_all("<Control-o>", lambda _event: self.import_files())
+        self.window.bind_all("<Control-f>", lambda _event: self.focus_search())
+        self.window.bind_all("<Control-s>", lambda _event: self.save_review())
+        self.window.bind_all("<Control-e>", lambda _event: self.export())
+        self.window.bind_all("<Control-Tab>", self.next_tab)
         self.poll_id = window.after(100, self.poll)
         window.bind("<Destroy>", self.on_destroy, add="+")
 
@@ -150,6 +178,24 @@ class DesktopApp:
                 self.window.after_cancel(self.autosave_id)
 
     def make_tasks(self):
+        self.onboarding = ttk.LabelFrame(self.tasks, text="开始使用（可关闭）", padding=8)
+        ttk.Label(
+            self.onboarding,
+            text=(
+                "1 导入简历 → 2 本地解析/OCR → 3 可选批量 AI → "
+                "4 人工确认 → 5 导出。支持 PDF、扫描 PDF、DOCX、TXT、MD；无需 API 也可完成整理和人工审阅。"
+            ),
+            wraplength=1120,
+        ).pack(side="left", fill="x", expand=True)
+        onboarding_import = ttk.Button(
+            self.onboarding, text="导入文件", command=self.import_files
+        )
+        onboarding_import.pack(side="left", padx=4)
+        self.busy_widgets.append(onboarding_import)
+        ttk.Button(self.onboarding, text="关闭引导", command=self.dismiss_onboarding).pack(
+            side="left", padx=4
+        )
+        self.onboarding.pack(fill="x", pady=(0, 6))
         bar = ttk.Frame(self.tasks)
         bar.pack(fill="x")
         self.role = tk.StringVar(value="按文件名自动分流")
@@ -165,25 +211,62 @@ class DesktopApp:
             ("导入目录", self.import_folder),
             ("监听目录", self.watch_folder),
             ("停止接收", self.stop_work),
+            ("删除选中", self.delete_selected),
             ("导出人工审阅", self.export),
+            ("导出完整审计", self.export_audit),
         ):
-            ttk.Button(bar, text=title, command=command).pack(side="left", padx=3)
+            button = ttk.Button(bar, text=title, command=command)
+            button.pack(side="left", padx=3)
+            self.busy_widgets.append(button)
+            if title == "停止接收":
+                self.stop_button = button
+        self.recursive = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bar, text="目录递归", variable=self.recursive).pack(
+            side="right", padx=4
+        )
+        document_scroll = ttk.Frame(self.tasks)
+        document_scroll.pack(fill="x", pady=10)
         self.documents = ttk.Treeview(
-            self.tasks,
-            columns=("name", "role", "status"),
+            document_scroll,
+            columns=(
+                "name",
+                "role",
+                "status",
+                "ai_status",
+                "ai_band",
+                "ai_recommendation",
+                "risk",
+                "human_status",
+                "updated",
+            ),
             show="headings",
             height=3,
             selectmode="extended",
         )
         for key, title, width in (
-            ("name", "材料", 510),
-            ("role", "岗位", 230),
-            ("status", "状态", 150),
+            ("name", "材料", 260),
+            ("role", "岗位", 150),
+            ("status", "本地状态", 105),
+            ("ai_status", "AI 状态", 95),
+            ("ai_band", "AI 档位", 75),
+            ("ai_recommendation", "AI 建议", 110),
+            ("risk", "主要风险", 180),
+            ("human_status", "人工状态", 90),
+            ("updated", "更新时间", 145),
         ):
             self.documents.heading(key, text=title)
             self.documents.column(key, width=width)
-        self.documents.pack(fill="x", pady=10)
+        self.documents.pack(side="top", fill="x")
+        document_xscroll = ttk.Scrollbar(
+            document_scroll, orient="horizontal", command=self.documents.xview
+        )
+        document_xscroll.pack(side="bottom", fill="x")
+        self.documents.configure(xscrollcommand=document_xscroll.set)
         self.documents.bind("<<TreeviewSelect>>", self.select_document)
+        self.documents.bind("<Control-a>", lambda _: self.select_all_visible())
+        self.documents.bind("<Escape>", lambda _: self.clear_selection())
+        self.selection_status = tk.StringVar(value="已选 0 份")
+        ttk.Label(self.tasks, textvariable=self.selection_status).pack(anchor="w")
         filters = ttk.Frame(self.tasks)
         filters.pack(fill="x", pady=(0, 4))
         ttk.Label(filters, text="筛选岗位").pack(side="left")
@@ -200,23 +283,72 @@ class DesktopApp:
         ttk.Combobox(
             filters,
             textvariable=self.filter_status,
-            values=["全部状态", "整理中", "待人工审阅", "人工审阅完成", "解析失败"],
+            values=[
+                "全部状态",
+                "整理中",
+                "待人工审阅",
+                "人工审阅完成",
+                "编码待确认",
+                "解析失败",
+            ],
             state="readonly",
             width=16,
         ).pack(side="left", padx=5)
-        for variable in (self.filter_role, self.filter_status):
+        ttk.Label(filters, text="筛选 AI").pack(side="left", padx=(10, 0))
+        self.filter_ai = tk.StringVar(value="全部 AI")
+        ttk.Combobox(
+            filters,
+            textvariable=self.filter_ai,
+            values=["全部 AI", "未运行", "处理中", "成功", "需人工核对", "失败"],
+            state="readonly",
+            width=12,
+        ).pack(side="left", padx=5)
+        ttk.Label(filters, text="排序").pack(side="left", padx=(10, 0))
+        self.sort_by = tk.StringVar(value="最近更新")
+        ttk.Combobox(
+            filters,
+            textvariable=self.sort_by,
+            values=["最近更新", "AI 优先级", "主要风险"],
+            state="readonly",
+            width=12,
+        ).pack(side="left", padx=5)
+        for variable in (self.filter_role, self.filter_status, self.filter_ai, self.sort_by):
             variable.trace_add("write", lambda *_: self.refresh())
         ttk.Button(
             filters,
             text="清除筛选",
-            command=lambda: (self.filter_role.set("全部岗位"), self.filter_status.set("全部状态")),
+            command=lambda: (
+                self.filter_role.set("全部岗位"),
+                self.filter_status.set("全部状态"),
+                self.filter_ai.set("全部 AI"),
+                self.sort_by.set("最近更新"),
+            ),
         ).pack(side="left", padx=5)
+        ttk.Button(filters, text="全选当前", command=self.select_all_visible).pack(
+            side="right", padx=3
+        )
+        ttk.Button(filters, text="清空选择", command=self.clear_selection).pack(
+            side="right", padx=3
+        )
         actions = ttk.Frame(self.tasks)
         actions.pack(fill="x")
         self.search = tk.StringVar()
-        ttk.Entry(actions, textvariable=self.search, width=22).pack(side="left")
+        search_entry = ttk.Entry(actions, textvariable=self.search, width=22)
+        self.search_entry = search_entry
+        search_entry.pack(side="left")
+        search_entry.bind("<Return>", lambda _: self.find_text())
+        self.busy_widgets.append(search_entry)
         ttk.Button(actions, text="查找原文线索", command=self.find_text).pack(
             side="left", padx=4
+        )
+        ttk.Button(actions, text="上一处", command=lambda: self.move_search(-1)).pack(
+            side="left", padx=2
+        )
+        ttk.Button(actions, text="下一处", command=lambda: self.move_search(1)).pack(
+            side="left", padx=2
+        )
+        ttk.Button(actions, text="清除高亮", command=self.clear_search).pack(
+            side="left", padx=2
         )
         ttk.Button(actions, text="打开原文件副本", command=self.open_source).pack(
             side="left", padx=4
@@ -224,9 +356,17 @@ class DesktopApp:
         ttk.Button(actions, text="查看岗位规则", command=self.show_rules).pack(
             side="left", padx=4
         )
-        ttk.Button(actions, text="对选中材料进行 AI 分析", command=self.analyze).pack(
-            side="right"
+        ttk.Button(actions, text="导入报告", command=self.open_import_report).pack(
+            side="left", padx=4
         )
+        ttk.Button(actions, text="修订历史", command=self.show_revision_history).pack(
+            side="left", padx=4
+        )
+        analyze_button = ttk.Button(
+            actions, text="对选中材料进行 AI 分析", command=self.analyze
+        )
+        analyze_button.pack(side="right")
+        self.busy_widgets.append(analyze_button)
         pane = ttk.Panedwindow(self.tasks, orient="horizontal")
         pane.pack(fill="both", expand=True, pady=(8, 0))
         left, right = ttk.Frame(pane), ttk.Frame(pane)
@@ -283,6 +423,144 @@ class DesktopApp:
         self.opinion.pack(fill="x")
         self.opinion.bind("<KeyRelease>", lambda _: self.mark_dirty())
 
+    def focus_search(self):
+        self.tabs.select(self.tasks)
+        self.search_entry.focus_set()
+        return "break"
+
+    def next_tab(self, _event=None):
+        current = self.tabs.index(self.tabs.select())
+        self.tabs.select((current + 1) % self.tabs.index("end"))
+        return "break"
+
+    def dismiss_onboarding(self):
+        self.onboarding_dismissed = True
+        self.onboarding.pack_forget()
+
+    def _update_selection_status(self):
+        visible = set(self.documents.get_children())
+        visible_selected = len(visible & self.selected_documents)
+        hidden_selected = len(self.selected_documents - visible)
+        suffix = f"（另有 {hidden_selected} 份因筛选不可见）" if hidden_selected else ""
+        self.selection_status.set(
+            f"已选 {len(self.selected_documents)} 份 · 当前可见已选 {visible_selected} 份{suffix}"
+        )
+
+    def select_all_visible(self):
+        self.selected_documents.update(self.documents.get_children())
+        if self.documents.get_children():
+            self.documents.selection_set(self.documents.get_children())
+        self._update_selection_status()
+
+    def clear_selection(self):
+        self.selected_documents.clear()
+        self.documents.selection_remove(self.documents.selection())
+        self._update_selection_status()
+
+    def _selected_ids(self) -> list[str]:
+        visible = set(self.documents.get_children())
+        selected = [item for item in self.documents.get_children() if item in self.selected_documents]
+        selected.extend(item for item in self.selected_documents - visible)
+        return selected
+
+    def delete_selected(self):
+        if self.busy:
+            messagebox.showinfo("任务正在运行", "请等待当前任务结束后再删除材料。")
+            return
+        selected = self._selected_ids()
+        if not selected and self.current:
+            selected = [self.current]
+        if not selected:
+            messagebox.showinfo("未选择材料", "请先选择需要放入回收区的材料。")
+            return
+        if not messagebox.askokcancel(
+            "移入回收区",
+            f"将 {len(selected)} 份材料移入本机回收区，默认 7 天后永久清除。\n"
+            "只影响本机应用管理的数据，不会删除飞书或模型供应商侧数据。是否继续？",
+        ):
+            return
+        for document_id in selected:
+            self.store.delete_document(document_id)
+        self.selected_documents.difference_update(selected)
+        self.current = None
+        self.refresh()
+        self.status.set(f"已移入回收区 {len(selected)} 份；可在设置页恢复或永久清除。")
+
+    def show_revision_history(self):
+        if not self.current:
+            messagebox.showinfo("未选择材料", "请先选择一份材料。")
+            return
+        popup = tk.Toplevel(self.window)
+        popup.title("人工修订时间线（只读）")
+        popup.geometry("760x430")
+        tree = ttk.Treeview(
+            popup,
+            columns=("revision", "created", "reviewer", "opinion"),
+            show="headings",
+        )
+        for key, title, width in (
+            ("revision", "版本", 70),
+            ("created", "时间", 180),
+            ("reviewer", "审阅者（自填）", 150),
+            ("opinion", "人工意见", 330),
+        ):
+            tree.heading(key, text=title)
+            tree.column(key, width=width)
+        tree.pack(fill="both", expand=True, padx=8, pady=8)
+        revisions = self.store.list_revisions(self.current)
+        for row in revisions:
+            tree.insert(
+                "",
+                "end",
+                iid=str(row["id"]),
+                values=(row.get("revision_number") or row["id"], row["created"], row["reviewer"], row["opinion"]),
+            )
+        preview = ScrolledText(popup, height=8, wrap="word")
+        preview.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        preview.configure(state="disabled")
+
+        def show(_=None):
+            selected = tree.selection()
+            if not selected:
+                return
+            row = self.store.get_revision(int(selected[0]))
+            value = (
+                f"修订 {row.get('revision_number') or row['id']} · {row['created']} · {row['reviewer']}\n"
+                f"人工意见：{row['opinion']}\n\n"
+                + json.dumps(json.loads(row["evidence"]), ensure_ascii=False, indent=2)
+            )
+            preview.configure(state="normal")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", value)
+            preview.configure(state="disabled")
+
+        tree.bind("<<TreeviewSelect>>", show)
+        ttk.Label(
+            popup,
+            text="历史版本只读查看，不会覆盖当前草稿或当前人工结论。",
+        ).pack(anchor="w", padx=8, pady=(0, 8))
+
+    def open_import_report(self):
+        path = self.store.root / "last-import-report.txt"
+        if not path.is_file():
+            reports = (self.store.root / "import-reports").glob("import-*.txt")
+            path = max(reports, key=lambda report: report.stat().st_mtime, default=path)
+        if not path.is_file():
+            messagebox.showinfo("暂无导入报告", "完成一次导入后，这里会显示逐文件报告。")
+            return
+        open_path(path)
+
+    def export_audit(self):
+        if self.busy:
+            messagebox.showinfo("任务正在运行", "请等待当前任务结束后再导出审计记录。")
+            return
+        folder = filedialog.askdirectory(title="选择完整审计导出目录")
+        if folder:
+            selected = self._selected_ids()
+            self.start_job(
+                lambda: f"完整审计记录已导出：{self.store.export_audit(Path(folder), selected or None)}"
+            )
+
     def make_settings(self):
         ttk.Label(
             self.settings,
@@ -307,47 +585,45 @@ class DesktopApp:
             variable.trace_add("write", lambda *_: self.refresh_key_status())
         form = ttk.Frame(self.settings)
         form.pack(anchor="w", fill="x")
-        for index, (label, var) in enumerate(
-            (
-                ("协议", self.provider),
-                ("HTTPS Base URL", self.base),
-                ("模型名称", self.model),
-                ("API Key", self.key),
-            )
-        ):
-            ttk.Label(form, text=label).grid(
-                row=index, column=0, sticky="w", pady=8, padx=(0, 16)
-            )
-            if index == 0:
-                widget = ttk.Combobox(
-                    form,
-                    textvariable=var,
-                    values=["openai-compatible", "minimax"],
-                    state="readonly",
-                    width=62,
-                )
-            elif index == 2:
-                holder = ttk.Frame(form)
-                self.model_widget = ttk.Combobox(
-                    holder,
-                    textvariable=var,
-                    values=self.model_options,
-                    state="normal",
-                    width=47,
-                )
-                self.model_widget.pack(side="left")
-                ttk.Button(
-                    holder,
-                    text="获取模型列表",
-                    command=self.discover_models,
-                ).pack(side="left", padx=(8, 0))
-                holder.grid(row=index, column=1, sticky="w")
-                continue
-            else:
-                widget = ttk.Entry(
-                    form, textvariable=var, width=65, show="•" if index == 3 else ""
-                )
-            widget.grid(row=index, column=1, sticky="w")
+        ttk.Label(form, text="服务协议").grid(row=0, column=0, sticky="w", pady=8, padx=(0, 16))
+        provider_widget = ttk.Combobox(
+            form,
+            textvariable=self.provider,
+            values=["openai-compatible", "minimax"],
+            state="readonly",
+            width=35,
+        )
+        provider_widget.grid(row=0, column=1, sticky="w")
+        self.busy_widgets.append(provider_widget)
+        ttk.Label(form, text="模型名称").grid(row=1, column=0, sticky="w", pady=8, padx=(0, 16))
+        holder = ttk.Frame(form)
+        self.model_widget = ttk.Combobox(
+            holder,
+            textvariable=self.model,
+            values=self.model_options,
+            state="normal",
+            width=30,
+        )
+        self.model_widget.pack(side="left")
+        discover = ttk.Button(holder, text="获取模型列表", command=self.discover_models)
+        discover.pack(side="left", padx=(8, 0))
+        holder.grid(row=1, column=1, sticky="w")
+        self.busy_widgets.extend((self.model_widget, discover))
+        ttk.Label(form, text="API Key").grid(row=2, column=0, sticky="w", pady=8, padx=(0, 16))
+        key_widget = ttk.Entry(form, textvariable=self.key, width=40, show="•")
+        key_widget.grid(row=2, column=1, sticky="w")
+        self.busy_widgets.append(key_widget)
+        advanced = ttk.LabelFrame(self.settings, text="高级设置（端点）", padding=8)
+        advanced.pack(anchor="w", fill="x", pady=(8, 0))
+        ttk.Label(advanced, text="HTTPS Base URL").grid(row=0, column=0, sticky="w", padx=(0, 16))
+        base_widget = ttk.Entry(advanced, textvariable=self.base, width=58)
+        base_widget.grid(row=0, column=1, sticky="w")
+        self.busy_widgets.append(base_widget)
+        ttk.Label(
+            advanced,
+            text="必须是 HTTPS；不含凭据、查询参数或片段。跨域重定向不会携带 Authorization。",
+            wraplength=800,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(self.settings, textvariable=self.model_status).pack(
             anchor="w", pady=(2, 0)
         )
@@ -356,17 +632,23 @@ class DesktopApp:
         )
         ttk.Label(
             self.settings,
-            text="Base URL 通常以 /v1 结尾。点击“获取模型列表”可读取兼容接口的 /models；不支持发现时仍可手动填写。\nKey 留空可使用已保存凭据；首次测试或 AI 分析时输入的 Key 也会自动保存，同一端点切换模型无需重复填写。密钥只写入系统凭据库，不写入普通配置和导出。",
+            text="Key 留空可使用已保存凭据；首次测试或 AI 分析时输入的 Key 会保存到系统凭据库。模型列表获取失败时仍可手动填写模型名。普通配置、备份、导出和诊断不包含明文密钥。",
             wraplength=950,
         ).pack(anchor="w", pady=12)
         bar = ttk.Frame(self.settings)
         bar.pack(anchor="w")
-        ttk.Button(bar, text="保存模型配置", command=self.save_model).pack(
+        save_button = ttk.Button(bar, text="保存模型配置", command=self.save_model)
+        save_button.pack(
             side="left", padx=(0, 8)
         )
-        ttk.Button(
+        test_button = ttk.Button(
             bar, text="测试连接（可能产生少量费用）", command=self.test_model
-        ).pack(side="left")
+        )
+        test_button.pack(side="left")
+        self.busy_widgets.extend((save_button, test_button))
+        ttk.Label(self.settings, text="模型状态", font=("Microsoft YaHei UI" if os.name == "nt" else "Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 0))
+        self.model_state_text = tk.StringVar(value="未配置")
+        ttk.Label(self.settings, textvariable=self.model_state_text).pack(anchor="w")
         ttk.Button(
             self.settings,
             text="继续本地整理，无需 API",
@@ -391,13 +673,39 @@ class DesktopApp:
         ttk.Button(self.settings, text="从备份恢复审阅数据", command=self.restore_data).pack(
             anchor="w", pady=3
         )
+        ttk.Button(self.settings, text="打开回收区", command=self.open_trash).pack(
+            anchor="w", pady=3
+        )
+        ttk.Button(self.settings, text="清除当前端点凭据", command=self.clear_credential).pack(
+            anchor="w", pady=3
+        )
+        ttk.Button(self.settings, text="清空全部本地数据", command=self.clear_all_data).pack(
+            anchor="w", pady=3
+        )
         self.refresh_key_status()
+        self.refresh_model_state()
 
     def make_history(self):
         ttk.Label(
             self.history,
-            text="每次 AI 分析独立保存；模型格式失败、需复核与成功分别显示。重新分析会再次调用收费服务。",
+            text="每次 AI 分析属于独立批次；原始响应与规范化结果只读保存。AI 建议只影响工作优先级，不是最终招聘决定。",
         ).pack(anchor="w")
+        ttk.Label(self.history, text="AI 批次").pack(anchor="w", pady=(8, 0))
+        self.batches = ttk.Treeview(
+            self.history,
+            columns=("batch_date", "batch_model", "batch_status", "batch_progress"),
+            show="headings",
+            height=3,
+        )
+        for key, title, width in (
+            ("batch_date", "创建时间", 180),
+            ("batch_model", "模型", 220),
+            ("batch_status", "状态", 130),
+            ("batch_progress", "进度", 100),
+        ):
+            self.batches.heading(key, text=title)
+            self.batches.column(key, width=width)
+        self.batches.pack(fill="x", pady=(2, 8))
         self.runs = ttk.Treeview(
             self.history, columns=("date", "model", "status"), show="headings", height=4
         )
@@ -431,6 +739,7 @@ class DesktopApp:
             return
         self.busy = True
         self.stop.clear()
+        self._set_busy_state(True)
 
         def run():
             try:
@@ -447,6 +756,15 @@ class DesktopApp:
 
         threading.Thread(target=run, name="resume-desk-worker", daemon=False).start()
 
+    def _set_busy_state(self, busy: bool) -> None:
+        for widget in self.busy_widgets:
+            widget.configure(
+                state="normal"
+                if widget is self.stop_button or not busy
+                else "disabled"
+            )
+        self.progress_bar.configure(maximum=max(1, self.progress_maximum.get()))
+
     def poll(self):
         while True:
             try:
@@ -459,11 +777,24 @@ class DesktopApp:
             if kind == "models":
                 self.apply_discovered_models(value)
                 continue
+            if kind == "progress_info":
+                self.progress_value.set(value.get("current", 0))
+                self.progress_maximum.set(max(1, value.get("total", 1)))
+                self.progress_bar.configure(maximum=max(1, value.get("total", 1)))
+                self.progress_text.set(value.get("text", ""))
+                self.status.set(value.get("text", ""))
+                continue
+            if kind == "model_state":
+                self.refresh_model_state()
+                self.status.set(value)
+                continue
             self.status.set(value)
             if kind == "progress":
                 self.refresh()
             if kind == "done":
                 self.busy = False
+                self._set_busy_state(False)
+                self.progress_text.set("")
                 self.refresh()
                 if self.exit_pending:
                     self.window.destroy()
@@ -472,6 +803,8 @@ class DesktopApp:
 
     def stop_work(self):
         self.stop.set()
+        if self.active_ai_batch:
+            self.store.request_ai_batch_stop(self.active_ai_batch)
         self.status.set("已停止接收新任务；当前任务完成后停止。")
 
     def reset_review(self):
@@ -479,7 +812,11 @@ class DesktopApp:
         self.current = None
         self.current_criterion = None
         self.evidence = []
+        if self.autosave_id is not None:
+            self.window.after_cancel(self.autosave_id)
+            self.autosave_id = None
         self.dirty = False
+        self.selected_documents.clear()
         for document_id in self.documents.selection():
             self.documents.selection_remove(document_id)
         self.criteria.delete(*self.criteria.get_children())
@@ -489,6 +826,7 @@ class DesktopApp:
         self.note.delete("1.0", "end")
         self.reviewer.set("")
         self.opinion.delete(0, "end")
+        self._update_selection_status()
 
     def import_files(self):
         paths = filedialog.askopenfilenames(
@@ -500,54 +838,162 @@ class DesktopApp:
     def import_folder(self):
         folder = filedialog.askdirectory()
         if folder:
-            self.prepare_files(
-                [
-                    p
-                    for p in Path(folder).iterdir()
-                    if p.is_file()
-                    and not is_ignored_watch_file(p)
-                    and p.suffix.lower() in SUPPORTED_SUFFIXES
-                ]
-            )
+            self.prepare_files([Path(folder)], recursive=self.recursive.get())
 
-    def prepare_files(self, paths):
+    def prepare_files(self, paths, *, recursive: bool = False):
         role = self.get_role()
         if not paths:
             self.status.set("没有支持的简历文件")
             return
+        try:
+            preview = self.store.preview_import(paths, role, recursive=recursive)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("无法预览导入", str(exc))
+            return
+        counts = preview["counts"]
+        if not counts["total"]:
+            self.status.set("没有找到可预览的文件")
+            return
         if not messagebox.askokcancel(
-            "开始本地整理",
-            f"共 {len(paths)} 个文件\n岗位：{self.role.get()}\n仅在本机处理，不调用模型。岗位冲突将跳过。",
+            "导入预览",
+            f"文件总数：{counts['total']}\n"
+            f"预计处理：{counts['to_process']}（其中编码待确认 {counts['encoding_pending']}）\n"
+            f"重复：{counts['duplicates']} · 岗位冲突：{counts['role_conflicts']} · "
+            f"未知岗位：{counts['unknown_role']} · 其他跳过：{counts['skipped']}\n"
+            f"岗位：{self.role.get()} · 递归：{'是' if recursive else '否'}\n"
+            "仅在本机处理，不调用模型；导入后会生成逐文件报告。是否继续？",
         ):
             return
+        batch_id = self.store.create_import_batch(
+            source=str(paths[0]) if paths else "",
+            recursive=recursive,
+            planned_count=counts["to_process"],
+        )
+        self.active_import_batch = batch_id
 
         def work():
             failures = []
             processed = 0
-            for index, path in enumerate(paths, 1):
+            items = preview["items"]
+            total = len(items)
+            for index, item in enumerate(items, 1):
                 if self.stop.is_set():
+                    for remaining in items[index - 1 :]:
+                        reason_code = (
+                            remaining["reason_code"]
+                            if not remaining["will_process"]
+                            else "OK"
+                        )
+                        status = "重复" if reason_code == "DUPLICATE" else "跳过"
+                        self.store.record_import_item(
+                            batch_id,
+                            path=remaining["path"],
+                            role=remaining.get("role"),
+                            document_id=remaining.get("document_id"),
+                            status=status,
+                            reason_code=reason_code,
+                            message=(
+                                remaining.get("message", "")
+                                if not remaining["will_process"]
+                                else "用户停止，未开始处理"
+                            ),
+                        )
                     break
-                self.events.put(("progress", f"正在本地整理 {index}/{len(paths)}"))
+                self.events.put(
+                    (
+                        "progress_info",
+                        {"current": index - 1, "total": total, "text": f"正在本地整理 {index}/{total}：{item['name']}"},
+                    )
+                )
+                if not item["will_process"]:
+                    status = "重复" if item["reason_code"] == "DUPLICATE" else "跳过"
+                    self.store.record_import_item(
+                        batch_id,
+                        path=item["path"],
+                        role=item.get("role"),
+                        document_id=item.get("document_id"),
+                        status=status,
+                        reason_code=item["reason_code"],
+                        message=item.get("message", ""),
+                    )
+                    if status != "重复":
+                        failures.append(f"{item['name']}：{item.get('message', '')}")
+                    continue
+                path = Path(item["path"])
                 try:
-                    record = self.store.prepare(path, role)
-                    processed += 1
-                    if record["status"] == "解析失败":
+                    record = self.store.prepare(path, item.get("role"), batch_id=batch_id)
+                    if record["status"] == "编码待确认":
+                        processed += 1
+                        self.store.record_import_item(
+                            batch_id,
+                            path=path,
+                            role=item.get("role"),
+                            document_id=record["id"],
+                            status="待确认",
+                            reason_code="ENCODING_PENDING",
+                            message=record["error"],
+                        )
+                    elif record["status"] == "解析失败":
+                        self.store.record_import_item(
+                            batch_id,
+                            path=path,
+                            role=item.get("role"),
+                            document_id=record["id"],
+                            status="失败",
+                            reason_code="PARSE_ERROR",
+                            message=record["error"],
+                        )
                         failures.append(f"{path.name}：{record['error']}")
+                    else:
+                        processed += 1
+                        self.store.record_import_item(
+                            batch_id,
+                            path=path,
+                            role=item.get("role"),
+                            document_id=record["id"],
+                            status="成功",
+                            reason_code="OK",
+                            message="本地解析完成",
+                        )
                 except ValueError as exc:
+                    self.store.record_import_item(
+                        batch_id,
+                        path=path,
+                        role=item.get("role"),
+                        document_id=item.get("document_id"),
+                        status="失败",
+                        reason_code="PARSE_ERROR",
+                        message=str(exc),
+                    )
                     failures.append(f"{path.name}：{exc}")
                 except OSError:
+                    self.store.record_import_item(
+                        batch_id,
+                        path=path,
+                        role=item.get("role"),
+                        document_id=item.get("document_id"),
+                        status="失败",
+                        reason_code="READ_ERROR",
+                        message="文件操作失败，请检查权限和磁盘空间",
+                    )
                     failures.append(
                         f"{path.name}：文件操作失败，请检查文件是否存在、访问权限和磁盘空间。"
                     )
-            if failures:
-                atomic_text(
-                    self.store.root / "last-import-report.txt", "\n".join(failures)
-                )
-            return (
-                f"已处理 {processed}/{len(paths)} 份，跳过或失败 {len(failures)} 份。详情见数据目录 last-import-report.txt。"
-                if failures
-                else f"本地整理结束：{processed}/{len(paths)} 份；请进行人工审阅。"
+            stopped = self.stop.is_set()
+            report = self.store.finish_import_batch(
+                batch_id, status="已停止" if stopped else "完成"
             )
+            self.active_import_batch = None
+            report_counts = report["counts"]
+            skipped_or_failed = report_counts["failed"] + report_counts["skipped"]
+            message = f"已处理 {processed}/{total} 份，跳过或失败 {skipped_or_failed} 份。"
+            if stopped:
+                message += " 已停止后续导入。"
+            if failures or report_counts["failed"] or report_counts["skipped"]:
+                message += " 详情见可打开的逐文件导入报告。"
+            else:
+                message += " 请进行人工审阅。"
+            return message
 
         self.start_job(work)
 
@@ -584,6 +1030,8 @@ class DesktopApp:
     def refresh(self):
         existing = set(self.documents.get_children())
         records = self.store.list_documents()
+        known_ids = {record["id"] for record in records}
+        self.selected_documents.intersection_update(known_ids)
         role_filter = self.filter_role.get()
         status_filter = self.filter_status.get()
         role_code = next(
@@ -595,17 +1043,61 @@ class DesktopApp:
             records = [
                 record for record in records if record["status"] == status_filter
             ]
+        ai_filter = self.filter_ai.get()
+        if ai_filter != "全部 AI":
+            records = [record for record in records if record["ai_status"] == ai_filter]
+        if self.sort_by.get() == "AI 优先级":
+            order = {"需人工核对": 0, "失败": 1, "处理中": 2, "成功": 3, "未运行": 4}
+            records.sort(key=lambda row: (order.get(row["ai_status"], 9), row["created"]))
+        elif self.sort_by.get() == "主要风险":
+            records.sort(key=lambda row: (not bool(row["ai_primary_risk"]), row["name"].casefold()))
         active = {record["id"] for record in records}
         for document_id in existing - active:
             self.documents.delete(document_id)
-        for record in records:
-            values = (record["name"], ROLES[record["role"]], record["status"])
+        for position, record in enumerate(records):
+            values = (
+                record["name"],
+                ROLES[record["role"]],
+                record["status"],
+                record["ai_status"],
+                record["ai_band"] or "",
+                record["ai_recommendation"] or "",
+                record["ai_primary_risk"] or "",
+                record["human_status"],
+                record["updated"],
+            )
             if record["id"] in existing:
                 self.documents.item(record["id"], values=values)
             else:
                 self.documents.insert("", "end", iid=record["id"], values=values)
+            self.documents.move(record["id"], "", position)
+        visible_selected = [item for item in self.documents.get_children() if item in self.selected_documents]
+        if visible_selected:
+            self.documents.selection_set(visible_selected)
+        self._update_selection_status()
+        if records or self.store.list_documents():
+            self.onboarding.pack_forget()
+        elif not self.onboarding_dismissed:
+            self.onboarding.pack(fill="x", pady=(0, 6), before=self.documents)
         self.runs.delete(*self.runs.get_children())
+        self.batches.delete(*self.batches.get_children())
         with closing(self.store.connect()) as db:
+            for batch in self.store.list_ai_batches():
+                batch_id = batch["id"]
+                item_count = db.execute(
+                    "SELECT COUNT(*) FROM ai_batch_items WHERE batch_id=?", (batch_id,)
+                ).fetchone()[0]
+                self.batches.insert(
+                    "",
+                    "end",
+                    iid=batch_id,
+                    values=(
+                        batch["created"],
+                        batch["model"],
+                        batch["status"],
+                        f"{batch['completed_count']}/{item_count}",
+                    ),
+                )
             for row in db.execute("SELECT * FROM ai_runs ORDER BY created DESC"):
                 config = json.loads(row["config"])
                 labels = {
@@ -626,6 +1118,10 @@ class DesktopApp:
 
     def select_document(self, _=None):
         selection = self.documents.selection()
+        visible = set(self.documents.get_children())
+        self.selected_documents.update(selection)
+        self.selected_documents.difference_update(visible - set(selection))
+        self._update_selection_status()
         if not selection or selection[0] == self.current:
             return
         if self.dirty:
@@ -646,6 +1142,8 @@ class DesktopApp:
         )
         self.content.insert("1.0", readable or record["error"])
         self.content.configure(state="disabled")
+        self.search_matches = []
+        self.search_index = -1
         material = self.store.role_material(record["role"])
         items = re.findall(
             r"^\|\s*`?([A-Z][A-Z0-9-]+-\d+)`?\s*\|\s*([^|]+)\|", material, re.MULTILINE
@@ -668,7 +1166,7 @@ class DesktopApp:
                 ]
             )
             restored_draft = bool(draft)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             self.evidence = []
             saved_state = review
             self.status.set("自动保存草稿格式异常，已回退到最近一次正式审阅。")
@@ -707,7 +1205,9 @@ class DesktopApp:
             self.autosave_id = self.window.after(700, self.autosave_draft)
 
     def autosave_draft(self):
-        self.autosave_id = None
+        if self.autosave_id is not None:
+            self.window.after_cancel(self.autosave_id)
+            self.autosave_id = None
         if self.current and self.dirty:
             self.save_draft_now()
             self.status.set("审阅草稿已自动保存；点击保存审阅后形成正式修订记录。")
@@ -745,26 +1245,40 @@ class DesktopApp:
         self.note.delete("1.0", "end")
         self.note.insert("1.0", item["note"])
         self.dirty = dirty
+        if not dirty and self.autosave_id is not None:
+            self.window.after_cancel(self.autosave_id)
+            self.autosave_id = None
 
     def save_review(self):
         if not self.current:
             return
         self.flush_criterion()
         try:
+            latest_ai = self.store.latest_ai_result(self.current)
             self.store.save_review(
-                self.current, self.reviewer.get(), self.opinion.get(), self.evidence
+                self.current,
+                self.reviewer.get(),
+                self.opinion.get(),
+                self.evidence,
+                source_ai_run_id=latest_ai.get("run_id") if latest_ai else None,
             )
         except ValueError as exc:
             messagebox.showerror("无法保存", str(exc))
             return
+        if self.autosave_id is not None:
+            self.window.after_cancel(self.autosave_id)
+            self.autosave_id = None
         self.dirty = False
         self.refresh()
         self.status.set("人工审阅已保存，历史修订保留。")
 
     def find_text(self):
         self.content.tag_remove("match", "1.0", "end")
+        self.search_matches = []
+        self.search_index = -1
         query = self.search.get().strip()
         if not query:
+            self.status.set("请输入要查找的原文线索。")
             return
         start, count = "1.0", 0
         while True:
@@ -773,11 +1287,31 @@ class DesktopApp:
                 break
             end = f"{position}+{len(query)}c"
             self.content.tag_add("match", position, end)
-            if count == 0:
-                self.content.see(position)
+            self.search_matches.append(position)
             start, count = end, count + 1
         self.content.tag_configure("match", background="#ffe39b", foreground="#202020")
-        self.status.set(f"找到 {count} 处线索。命中不代表符合，未命中也不代表不具备。")
+        if self.search_matches:
+            self.search_index = 0
+            self.content.see(self.search_matches[0])
+            self.status.set(f"找到 {count} 处线索（1/{count}）。命中不代表符合，未命中也不代表不具备。")
+        else:
+            self.status.set("未找到线索。未命中不代表不具备，请继续人工核对。")
+
+    def move_search(self, direction: int):
+        if not self.search_matches:
+            self.find_text()
+            return
+        self.search_index = (self.search_index + direction) % len(self.search_matches)
+        self.content.see(self.search_matches[self.search_index])
+        self.status.set(
+            f"当前线索 {self.search_index + 1}/{len(self.search_matches)}。命中不代表符合。"
+        )
+
+    def clear_search(self):
+        self.content.tag_remove("match", "1.0", "end")
+        self.search_matches = []
+        self.search_index = -1
+        self.status.set("已清除原文高亮。")
 
     def open_source(self):
         if self.current:
@@ -817,6 +1351,18 @@ class DesktopApp:
                 self.key_status.set("API Key 状态：未保存；点击保存、测试或 AI 分析后会写入系统凭据库")
         except (ValueError, OSError, TypeError):
             self.key_status.set("API Key 状态：等待有效的 HTTPS Base URL 和模型配置")
+
+    def refresh_model_state(self):
+        try:
+            config = self.model_config()
+            role = self.store.get(self.current)["role"] if self.current else ""
+            value = self.store.model_state(config, role=role)
+            state = value["state"]
+            self.model_state_text.set(
+                f"{state}。连接可用不等于质量验证；AI 建议不自动推进或淘汰候选人。"
+            )
+        except (OSError, ValueError, TypeError, sqlite3.DatabaseError):
+            self.model_state_text.set("未配置。可继续本地整理，无需 API。")
 
     def persist_entered_key(self, config):
         """Remember a newly entered key before a paid operation starts."""
@@ -876,6 +1422,7 @@ class DesktopApp:
             save_config(self.store.root, config, self.key.get())
             self.key.set("")
             self.refresh_key_status(config)
+            self.refresh_model_state()
             self.status.set("配置已保存，密钥存入系统凭据库。")
         except Exception as exc:  # noqa: BLE001 -- OS keychain errors must not leak credential arguments.
             messagebox.showerror(
@@ -893,7 +1440,7 @@ class DesktopApp:
         config, key = self.model_config(), self.key.get().strip()
         try:
             self.persist_entered_key(config)
-            configured_client(config, key)
+            client = configured_client(config, key)
         except Exception as exc:  # noqa: BLE001 -- keep provider credentials out of UI errors.
             messagebox.showerror(
                 "无法测试模型",
@@ -902,12 +1449,122 @@ class DesktopApp:
                 else "模型配置或系统凭据不可用，请检查设置",
             )
             return
-        self.start_job(lambda: configured_client(config).test())
+        def work():
+            result = client.test()
+            self.store.mark_model_connection(
+                config,
+                role=self.store.get(self.current)["role"] if self.current else "",
+            )
+            self.events.put(("model_state", "连接可用"))
+            return result
+
+        self.start_job(work)
+
+    def clear_credential(self):
+        try:
+            config = self.model_config()
+            _ = config.models_endpoint
+        except ValueError as exc:
+            messagebox.showinfo("无法清除凭据", str(exc))
+            return
+        if not messagebox.askokcancel(
+            "清除系统凭据",
+            "只清除当前服务与 Base URL 对应的本机凭据，不删除材料、审阅或其他端点凭据。是否继续？",
+        ):
+            return
+        try:
+            clear_saved_credential(config)
+        except Exception as exc:  # noqa: BLE001 -- keyring backend errors are shown without credential data.
+            messagebox.showerror(
+                "凭据未清除",
+                str(exc) if isinstance(exc, ValueError) else "系统凭据库不可用，请检查系统权限",
+            )
+            return
+        self.key_status.set("API Key 状态：未保存；已清除当前端点的系统凭据。")
+        self.model_state_text.set("未配置。清除凭据后后续模型请求不会继续使用旧 Key。")
+        self.status.set("当前端点凭据已从系统凭据库清除。")
+
+    def clear_all_data(self):
+        if self.busy:
+            messagebox.showinfo("任务正在运行", "请等待当前任务结束后再清空本地数据。")
+            return
+        if not messagebox.askokcancel(
+            "清空全部本地数据",
+            "这会清除材料、提取文本、草稿、人工修订、AI 历史、导入报告和回收区。"
+            "模型配置与系统凭据不会随之清除。是否继续？",
+        ):
+            return
+        if not messagebox.askyesno(
+            "再次确认清空",
+            "本机应用管理的数据将无法从回收区恢复；飞书和供应商侧数据不受影响。确定清空？",
+        ):
+            return
+        result = self.store.clear_all_data()
+        self.reset_review()
+        self.refresh()
+        self.status.set(
+            f"已清空本地数据：材料 {result['documents']} 份、修订 {result['revisions']} 条、AI 运行 {result['ai_runs']} 条；系统凭据仍保留。"
+        )
+
+    def open_trash(self):
+        popup = tk.Toplevel(self.window)
+        popup.title("本机回收区（默认 7 天后清除）")
+        popup.geometry("780x360")
+        tree = ttk.Treeview(
+            popup,
+            columns=("name", "deleted", "purge", "status"),
+            show="headings",
+            selectmode="extended",
+        )
+        for key, title, width in (
+            ("name", "材料", 300),
+            ("deleted", "删除时间", 175),
+            ("purge", "计划清除", 175),
+            ("status", "原状态", 100),
+        ):
+            tree.heading(key, text=title)
+            tree.column(key, width=width)
+        tree.pack(fill="both", expand=True, padx=8, pady=8)
+
+        def reload_trash():
+            tree.delete(*tree.get_children())
+            for row in self.store.list_trash():
+                tree.insert(
+                    "",
+                    "end",
+                    iid=row["id"],
+                    values=(row["name"], row["trash_deleted_at"], row["trash_purge_at"], row["original_status"]),
+                )
+
+        def restore():
+            for document_id in tree.selection():
+                self.store.restore_document(document_id)
+            reload_trash()
+            self.refresh()
+
+        def purge():
+            if not tree.selection() or not messagebox.askyesno(
+                "永久清除", "选中材料及其本地原始副本、审阅和 AI 关联将永久清除，是否继续？"
+            ):
+                return
+            for document_id in tree.selection():
+                self.store.purge_document(document_id)
+            reload_trash()
+            self.refresh()
+
+        buttons = ttk.Frame(popup)
+        buttons.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Button(buttons, text="恢复", command=restore).pack(side="left", padx=3)
+        ttk.Button(buttons, text="立即永久清除", command=purge).pack(side="left", padx=3)
+        ttk.Label(buttons, text="仅作用于本机；不删除飞书或供应商侧数据。").pack(side="right")
+        reload_trash()
 
     def analyze(self):
         if self.busy:
             return
-        selected = list(self.documents.selection())
+        selected = list(
+            dict.fromkeys(list(self.documents.selection()) + self._selected_ids())
+        )
         if not selected and self.current:
             selected = [self.current]
         if not selected:
@@ -960,7 +1617,7 @@ class DesktopApp:
             return
         try:
             self.persist_entered_key(config)
-            configured_client(config, key)
+            client = configured_client(config, key)
         except Exception as exc:  # noqa: BLE001 -- keep provider credentials out of UI errors.
             messagebox.showerror(
                 "无法开始 AI 分析",
@@ -970,52 +1627,158 @@ class DesktopApp:
             )
             return
 
+        batch_snapshot = {
+            "provider": config.provider,
+            "base_url": config.base_url.strip().rstrip("/"),
+            "endpoint_identity": config.endpoint_identity,
+            "model": config.model,
+            "config_identity": config.identity,
+            "output_contract_version": AI_OUTPUT_CONTRACT_VERSION,
+            "roles": sorted({record["role"] for record in ready}),
+        }
+        try:
+            batch_id = self.store.create_ai_batch(
+                [record["id"] for record in ready],
+                config_snapshot=batch_snapshot,
+                repeat_billing_confirmed=bool(duplicates),
+            )
+            self.store.mark_ai_batch_started(batch_id)
+        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+            messagebox.showerror("无法创建 AI 批次", str(exc))
+            return
+        self.active_ai_batch = batch_id
+
         def work():
-            client = configured_client(config)
             counts = {}
             errors = []
             completed = 0
             paused_reason = None
-            for index, record in enumerate(ready, 1):
-                if self.stop.is_set():
-                    break
-                self.events.put(
-                    ("progress", f"正在 AI 分析 {index}/{len(ready)}：{record['name']}")
+
+            def progress_message() -> str:
+                labels = {
+                    "succeeded": "成功",
+                    "manual_review": "需人工核对",
+                    "retryable_failed": "失败",
+                    "failed": "失败",
+                }
+                detail = "、".join(
+                    f"{labels.get(status, status)} {count} 份"
+                    for status, count in counts.items()
                 )
-                try:
-                    outcome = run_analysis(
-                        self.store, record["id"], config, client
-                    )
-                    status, _folder = outcome
-                    counts[status] = counts.get(status, 0) + 1
-                    completed += 1
-                    error_code = getattr(outcome, "error_code", None)
-                    if error_code in _BATCH_PAUSE_ERROR_CODES:
-                        paused_reason = error_code
-                        errors.append(f"{record['name']}：{error_code}")
+                return f"已完成 AI 分析 {completed}/{len(ready)}" + (
+                    f"（{detail}）" if detail else ""
+                )
+
+            try:
+                for index, record in enumerate(ready, 1):
+                    if self.stop.is_set():
                         break
-                except ValueError as exc:
-                    errors.append(f"{record['name']}：{exc}")
-                except Exception as exc:  # noqa: BLE001 -- isolate each paid run.
-                    errors.append(
-                        f"{record['name']}：{type(exc).__name__}，请在 AI 历史中核对状态"
+                    self.events.put(
+                        (
+                            "progress_info",
+                            {
+                                "current": completed,
+                                "total": len(ready),
+                                "text": f"正在 AI 分析 {index}/{len(ready)}：{record['name']}",
+                            },
+                        )
                     )
-            detail = "、".join(f"{status} {count} 份" for status, count in counts.items())
-            if not detail:
-                detail = "未完成"
-            message = f"AI 批量分析结束：完成 {completed}/{len(ready)} 份（{detail}）。"
-            if self.stop.is_set() and completed < len(ready):
-                message += " 已停止接收后续材料。"
-            if paused_reason:
-                message += (
-                    f" 供应商错误 {paused_reason}，批次已暂停；"
-                    "修正配置或等待限流恢复后请显式重新发起。"
+                    try:
+                        outcome = run_analysis(
+                            self.store,
+                            record["id"],
+                            config,
+                            client,
+                            batch_id=batch_id,
+                        )
+                        status, _folder = outcome
+                        counts[status] = counts.get(status, 0) + 1
+                        completed += 1
+                        error_code = outcome.error_code
+                        run_id = outcome.run_id
+                        item_status = {
+                            "succeeded": "成功",
+                            "manual_review": "需人工核对",
+                            "retryable_failed": "失败",
+                        }.get(status, "需人工核对")
+                        self.store.update_ai_batch_item(
+                            batch_id,
+                            record["id"],
+                            status=item_status,
+                            run_id=run_id,
+                            error=error_code or "",
+                        )
+                        self.events.put(
+                            (
+                                "progress_info",
+                                {
+                                    "current": completed,
+                                    "total": len(ready),
+                                    "text": progress_message(),
+                                },
+                            )
+                        )
+                        if error_code in _BATCH_PAUSE_ERROR_CODES:
+                            paused_reason = error_code
+                            errors.append(f"{record['name']}：{error_code}")
+                            break
+                    except ValueError as exc:
+                        completed += 1
+                        counts["failed"] = counts.get("failed", 0) + 1
+                        self.store.update_ai_batch_item(
+                            batch_id,
+                            record["id"],
+                            status="失败",
+                            error=str(exc),
+                        )
+                        errors.append(f"{record['name']}：{exc}")
+                    except Exception as exc:  # noqa: BLE001 -- isolate each paid run.
+                        completed += 1
+                        counts["failed"] = counts.get("failed", 0) + 1
+                        self.store.update_ai_batch_item(
+                            batch_id,
+                            record["id"],
+                            status="失败",
+                            error=f"{type(exc).__name__}：操作失败",
+                        )
+                        errors.append(
+                            f"{record['name']}：{type(exc).__name__}，请在 AI 历史中核对状态"
+                        )
+                labels = {
+                    "succeeded": "成功",
+                    "manual_review": "需人工核对",
+                    "retryable_failed": "失败",
+                    "failed": "失败",
+                }
+                detail = "、".join(
+                    f"{labels.get(status, status)} {count} 份"
+                    for status, count in counts.items()
                 )
-            if errors:
-                message += " 失败：" + "；".join(errors[:3])
-                if len(errors) > 3:
-                    message += f"；另有 {len(errors) - 3} 份失败"
-            return message
+                if not detail:
+                    detail = "未完成"
+                message = f"AI 批量分析结束：完成 {completed}/{len(ready)} 份（{detail}）。"
+                if self.stop.is_set() and completed < len(ready):
+                    message += " 已停止接收后续材料。"
+                if paused_reason:
+                    message += (
+                        f" 供应商错误 {paused_reason}，批次已暂停；"
+                        "修正配置或等待限流恢复后请显式重新发起。"
+                    )
+                if errors:
+                    message += " 失败：" + "；".join(errors[:3])
+                    if len(errors) > 3:
+                        message += f"；另有 {len(errors) - 3} 份失败"
+                return message
+            finally:
+                try:
+                    self.store.finish_ai_batch(
+                        batch_id,
+                        stopped=self.stop.is_set(),
+                        paused=bool(paused_reason),
+                        note=paused_reason or "",
+                    )
+                finally:
+                    self.active_ai_batch = None
 
         self.start_job(work)
 

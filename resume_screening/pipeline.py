@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from .assembly import assemble_ai_product_manager_record, assemble_senior_record
 from .cleaning import ResumeQualityError, clean_resume
 from .contracts import validate_record
+from .desktop_ai_contract import build_ai_result, validate_ai_result
 from .minimax import (
     AmbiguousModelError,
     ModelCallError,
@@ -31,6 +32,7 @@ from .queue import (
 from .rendering import render_conclusion
 from .scoring import score_record
 from .versions import contract_matches
+from .operations_assembly import assemble_operations_record
 
 
 class ModelClient(Protocol):
@@ -52,6 +54,15 @@ def _atomic_write(path: Path, text: str) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(text, encoding="utf-8")
     temporary.replace(path)
+
+
+def _credential_safe_response(client: Any, content: str) -> tuple[str, bool]:
+    """Return response text safe to persist and whether a client key was echoed."""
+
+    secret = getattr(client, "api_key", None) or getattr(client, "key", "")
+    if not isinstance(secret, str) or not secret:
+        return content, False
+    return content.replace(secret, "[已脱敏密钥]"), secret in content
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
@@ -90,12 +101,14 @@ class ScreeningPipeline:
         output_root: str | Path,
         project_root: str | Path,
         lease_id: str | None = None,
+        result_metadata: dict[str, Any] | None = None,
     ):
         self.store = store
         self.client = client
         self.output_root = Path(output_root).resolve()
         self.project_root = Path(project_root).resolve()
         self.lease_id = lease_id
+        self.result_metadata = dict(result_metadata or {})
 
     def _output_dir(self, task: TaskRecord) -> Path:
         return self.output_root / _safe_candidate_dir(task.candidate_id)
@@ -218,7 +231,28 @@ class ScreeningPipeline:
                     response=response,
                 )
 
+            # Keep the provider response separate from the normalized result;
+            # neither file contains the API credential.
+            safe_content, response_contains_key = _credential_safe_response(
+                self.client, response.content
+            )
+            _atomic_write(
+                output_dir / "raw-response.json",
+                json.dumps(
+                    {
+                        "response_id": response.response_id,
+                        "usage": response.usage,
+                        "content": safe_content,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+            )
+
             try:
+                if response_contains_key:
+                    raise ValueError("模型响应包含 API Key，已阻止写入规范化结果")
                 record = _parse_json_object(response.content)
                 if task.role == "senior-fullstack-engineer":
                     record = assemble_senior_record(
@@ -240,13 +274,40 @@ class ScreeningPipeline:
                         jd_version=task.jd_version,
                         rubric_version=task.rubric_version,
                     )
+                elif task.role == "operations-devops-engineer":
+                    record = assemble_operations_record(
+                        record,
+                        screening_record_id=f"sr-{task.task_id:08d}",
+                        candidate_id=task.candidate_id,
+                        candidate_name=task.candidate_name,
+                        jd_version=task.jd_version,
+                        rubric_version=task.rubric_version,
+                        resume_text=cleaned.model_text,
+                    )
                 else:
                     _apply_authoritative_identity(record, task)
                 errors = validate_record(self.project_root, task.role, record)
                 if errors:
                     raise ValueError("; ".join(errors))
                 scorecard = score_record(record).as_dict()
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                ai_result = build_ai_result(
+                    record,
+                    scorecard,
+                    document_id=task.candidate_id,
+                    redacted_text=cleaned.model_text,
+                    provider=str(self.result_metadata.get("provider", "")),
+                    endpoint_identity=str(
+                        self.result_metadata.get("endpoint_identity", "")
+                    ),
+                    model=str(self.result_metadata.get("model", task.model)),
+                    parser_version=task.parser_version,
+                    scoring_version=task.scoring_version,
+                    prompt_version=task.prompt_version,
+                )
+                contract_errors = validate_ai_result(ai_result, cleaned.model_text)
+                if contract_errors:
+                    raise ValueError("; ".join(contract_errors))
+            except (KeyError, TypeError, ValueError) as exc:
                 self.store.mark_manual_review(
                     task.task_id,
                     code="INVALID_MODEL_OUTPUT",
@@ -255,26 +316,36 @@ class ScreeningPipeline:
                     api_response_id=response.response_id,
                     lease_id=self.lease_id,
                 )
-                try:
-                    _atomic_write(
-                        output_dir / "manual-review.json",
-                        json.dumps(
-                            {
-                                "code": "INVALID_MODEL_OUTPUT",
-                                "message": sanitize_diagnostic(exc),
-                            },
-                            ensure_ascii=False,
-                            indent=2,
-                        )
-                        + "\n",
+                diagnostic = (
+                    json.dumps(
+                        {
+                            "code": "INVALID_MODEL_OUTPUT",
+                            "message": sanitize_diagnostic(exc),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
                     )
+                    + "\n"
+                )
+                try:
+                    for filename in ("manual-review.json", "validation-error.json"):
+                        _atomic_write(output_dir / filename, diagnostic)
                 except OSError:
                     # The durable queue state is already manual_review; a
                     # broken output directory must not stop the watch loop.
                     pass
                 return self.store.get(task.task_id)
 
-            envelope = {"screening_record": record, "scorecard": scorecard}
+            _atomic_write(
+                output_dir / "normalized-output.json",
+                json.dumps(ai_result, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n",
+            )
+            envelope = {
+                "screening_record": record,
+                "scorecard": scorecard,
+                "ai_result": ai_result,
+            }
             conclusion = render_conclusion(record, scorecard)
             try:
                 _atomic_write(

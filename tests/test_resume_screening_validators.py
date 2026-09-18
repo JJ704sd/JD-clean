@@ -133,6 +133,14 @@ def make_advance(skill_dir: str) -> dict:
     if skill_dir == SENIOR_DIR:
         set_supported(record, "SEN-EXP-01", "E2")
         set_supported(record, "SEN-ADM-01", "E1")
+        if record["rubric_version"] == SENIOR.EXPECTED_RUBRIC_VERSION:
+            education = evidence_item(record, "SEN-ADM-01")
+            education["first_education"] = {
+                "level": "bachelor_or_above",
+                "excerpt": "2012–2016 本科",
+                "location": "教育经历",
+                "confidence": "high",
+            }
         set_supported(record, "SEN-ARCH-01", "E2")
         set_supported(record, "SEN-DOMAIN-01", "E2")
         set_supported(record, "SEN-LEVEL-01", "E3")
@@ -143,6 +151,8 @@ def make_advance(skill_dir: str) -> dict:
         profile["qualification_dimensions"] = {
             "education": "met",
         }
+        if record["rubric_version"] == SENIOR.EXPECTED_RUBRIC_VERSION:
+            profile["qualification_dimensions"]["first_education"] = "met"
         profile["unmet_requirement_count"] = 0
         profile["experience_fit_signal"] = "preferred_3_to_7_years"
         profile["language_acceptance"] = "no_resistance_evidenced"
@@ -170,6 +180,15 @@ def make_negative(skill_dir: str) -> dict:
         record["priority_profile"]["refactoring_experience"] = "not_evidenced"
         record["priority_profile"]["valuable_project_experience"] = "not_evidenced"
         record["priority_profile"]["qualification_dimensions"]["education"] = "not_met"
+        if record["rubric_version"] == SENIOR.EXPECTED_RUBRIC_VERSION:
+            education = evidence_item(record, "SEN-ADM-01")
+            education["first_education"] = {
+                "level": "below_bachelor",
+                "excerpt": "2014–2017 大专",
+                "location": "教育经历",
+                "confidence": "high",
+            }
+            record["priority_profile"]["qualification_dimensions"]["first_education"] = "not_met"
         record["priority_profile"]["unmet_requirement_count"] = 1
         record["priority_profile"]["project_ownership_signal"] = "not_evidenced"
     else:
@@ -183,6 +202,15 @@ def make_negative(skill_dir: str) -> dict:
 
 
 class ScreeningValidatorTests(unittest.TestCase):
+    def test_v13_records_remain_read_only_compatible_after_v14_activation(self):
+        legacy = make_advance(SENIOR_DIR)
+        legacy["rubric_version"] = SENIOR.V13_RUBRIC_VERSION
+        legacy["priority_profile"]["qualification_dimensions"] = {"education": "met"}
+        legacy_evidence = evidence_item(legacy, "SEN-ADM-01")
+        legacy_evidence.pop("first_education", None)
+
+        self.assertEqual(SENIOR.validate_record(legacy), [])
+
     def test_senior_v6_requires_go_and_keeps_v5_read_compatible(self):
         legacy_v5 = documented_record(SENIOR_DIR)
         legacy_v5["rubric_version"] = SENIOR.V5_RUBRIC_VERSION
@@ -943,11 +971,13 @@ class ScreeningValidatorTests(unittest.TestCase):
         senior_advance = make_advance(SENIOR_DIR)
         set_not_evidenced(senior_advance, "SEN-DOMAIN-01")
         senior_advance["priority_profile"]["logistics_experience"] = "not_evidenced"
-        evidence_item(senior_advance, "SEN-ADM-01")["confidence"] = "low"
+        education = evidence_item(senior_advance, "SEN-ADM-01")
+        education["first_education"]["confidence"] = "low"
         senior_advance["priority_profile"]["qualification_dimensions"]["education"] = "unclear"
+        senior_advance["priority_profile"]["qualification_dimensions"]["first_education"] = "unclear"
         self.assertTrue(
             any(
-                "v13 advance requires the education gate" in error
+                "v14 advance requires the first-education gate" in error
                 for error in SENIOR.validate_record(senior_advance)
             )
         )
@@ -962,12 +992,14 @@ class ScreeningValidatorTests(unittest.TestCase):
         )
 
         senior_negative = make_negative(SENIOR_DIR)
-        evidence_item(senior_negative, "SEN-ADM-01")["confidence"] = "low"
+        education = evidence_item(senior_negative, "SEN-ADM-01")
+        education["first_education"]["confidence"] = "low"
         senior_negative["priority_profile"]["qualification_dimensions"]["education"] = "unclear"
+        senior_negative["priority_profile"]["qualification_dimensions"]["first_education"] = "unclear"
         senior_negative["priority_profile"]["unmet_requirement_count"] = 0
         self.assertTrue(
             any(
-                "unclear v13 education gate requires second review" in error
+                "unclear v14 first-education gate requires second review" in error
                 for error in SENIOR.validate_record(senior_negative)
             )
         )
@@ -989,11 +1021,24 @@ class ScreeningValidatorTests(unittest.TestCase):
                 record["model_recommendation"] = "do_not_advance_pending_human"
                 errors = validator.validate_record(record)
                 expected = (
-                    "v13 negative recommendation requires education failure or an exclusion signal"
+                    "v14 negative recommendation requires first-education failure or an exclusion signal"
                     if skill_dir == SENIOR_DIR
                     else "negative evidence gate"
                 )
                 self.assertTrue(any(expected in error for error in errors))
+
+    def test_v14_first_education_detail_is_only_allowed_on_admin_criterion(self):
+        senior = make_advance(SENIOR_DIR)
+        education = evidence_item(senior, "SEN-ADM-01")
+        backend = evidence_item(senior, "SEN-BE-01")
+        backend["first_education"] = copy.deepcopy(education["first_education"])
+
+        self.assertTrue(
+            any(
+                "first_education is only allowed on SEN-ADM-01" in error
+                for error in SENIOR.validate_record(senior)
+            )
+        )
 
     def test_conflicting_source_facts_cannot_be_used_as_a_direct_negative_gate(self):
         for validator, _, skill_dir in SKILLS:
@@ -1013,6 +1058,16 @@ class ScreeningValidatorTests(unittest.TestCase):
                         "confidence": "high",
                     }
                 )
+                if skill_dir == SENIOR_DIR and isinstance(item.get("first_education"), dict):
+                    item["first_education"].update(
+                        level="unclear",
+                        excerpt="教育经历中的日期和学历标记相互矛盾",
+                        location="教育经历",
+                        confidence="high",
+                    )
+                    record["priority_profile"]["qualification_dimensions"]["education"] = "unclear"
+                    record["priority_profile"]["qualification_dimensions"]["first_education"] = "unclear"
+                    record["priority_profile"]["unmet_requirement_count"] = 0
                 errors = validator.validate_record(record)
                 self.assertTrue(
                     any(

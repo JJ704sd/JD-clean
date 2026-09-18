@@ -1,6 +1,6 @@
 # 输出契约（Schema 1.2）
 
-本文件定义按需使用的审计 JSON，不是默认首屏输出。日常筛选先按[结论卡格式](conclusion-format.md)给出简洁结论；只有用户要求 JSON、导出、保存或审计记录时才附加本记录。JSON 必须覆盖全部 9 个 criterion；示例展示学历证据置信度不足、需要二审的记录：
+本文件定义按需使用的审计 JSON，不是默认首屏输出。日常筛选先按[结论卡格式](conclusion-format.md)给出简洁结论；只有用户要求 JSON、导出、保存或审计记录时才附加本记录。v14 JSON 必须覆盖全部 9 个 criterion；示例展示第一学历证据置信度不足、需要二审的记录：
 
 ```json
 {
@@ -10,17 +10,18 @@
   "candidate_name": "张三",
   "role": "senior-fullstack-engineer",
   "jd_version": "senior-fullstack-2026-08-14-v1",
-  "rubric_version": "senior-fullstack-2026-09-11-v13",
+  "rubric_version": "senior-fullstack-2026-09-14-v14",
   "screening_status": "non_final",
   "model_recommendation": "second_review",
-  "recommendation_rationale": "学历证据置信度不足，需二审确认是否满足本科及以上硬门槛；经验年限只影响评分。",
+  "recommendation_rationale": "第一学历证据置信度不足，需二审确认是否满足本科及以上硬门槛；经验年限只影响评分。",
   "priority_profile": {
     "target_stack": "go_present",
     "refactoring_experience": "supported",
     "logistics_experience": "supported",
     "valuable_project_experience": "unclear",
     "qualification_dimensions": {
-      "education": "unclear"
+      "education": "met",
+      "first_education": "unclear"
     },
     "unmet_requirement_count": 0,
     "experience_fit_signal": "preferred_3_to_7_years",
@@ -43,10 +44,10 @@
     {"criterion_id": "SEN-AI-01", "state": "not_evidenced", "strength": "E0", "excerpt": null, "location": null, "rationale": "简历未提供 AI/RAG 工程证据；单独不阻断", "confidence": "high"},
     {"criterion_id": "SEN-DOMAIN-01", "state": "supported", "strength": "E2", "excerpt": "负责跨境订单履约和轨迹异常处理模块", "location": "项目 A", "rationale": "有物流履约业务项目证据，但项目归属仍需核对", "confidence": "low"},
     {"criterion_id": "SEN-LEVEL-01", "state": "supported", "strength": "E3", "excerpt": "主导生产订单批处理模块重构，对比同步与异步方案后采用异步队列；上线后 30 天监控显示耗时由 18 分钟降至 6 分钟", "location": "项目 B", "rationale": "项目规模与个人影响口径仍需核对", "confidence": "low"},
-    {"criterion_id": "SEN-ADM-01", "state": "supported", "strength": "E1", "excerpt": "计算机科学与技术本科", "location": "教育经历", "rationale": "学历原文可定位，但扫描清晰度不足", "confidence": "low"}
+    {"criterion_id": "SEN-ADM-01", "state": "supported", "strength": "E1", "excerpt": "最高学历：硕士", "location": "教育经历", "rationale": "简历明确提供最高学历，但没有足够信息确认第一学历", "confidence": "high", "first_education": {"level": "unclear", "excerpt": null, "location": null, "confidence": "low"}}
   ],
   "uncertainties": [
-    {"code": "U06_BOUNDARY_CASE", "description": "学历证据置信度不足", "decision_impact": "确认后可能使 education 在 met 与 not_met 之间变化", "required_human_action": "独立回看教育经历原文并确认学历层次"}
+    {"code": "U06_BOUNDARY_CASE", "description": "第一学历证据置信度不足", "decision_impact": "确认后可能使 first_education 在 met 与 not_met 之间变化", "required_human_action": "独立回看教育经历原文和时间顺序，确认第一学历层次"}
   ],
   "interview_probes": [
     {"priority": 1, "criterion_id": "SEN-ARCH-01", "question": "BFF 拆分中哪些服务边界由你决定，依据是什么？", "expected_signal": "能说明约束、备选方案、个人决策和结果"},
@@ -78,10 +79,34 @@
 }
 ```
 
+## v14 第一学历证据契约
+
+模型证据中的 `SEN-ADM-01` 必须附带下列结构化字段；它是供 Python 确定性判定使用的提取结果，不允许模型直接决定筛选状态：
+
+```json
+{
+  "criterion_id": "SEN-ADM-01",
+  "first_education": {
+    "level": "unclear",
+    "excerpt": null,
+    "location": null,
+    "confidence": "low"
+  }
+}
+```
+
+`level` 的允许值为 `bachelor_or_above`、`below_bachelor`、`unclear`；示例展示无法确定的情况。`confidence` 的允许值为 `high`、`medium`、`low`。常规 `SEN-ADM-01.state/excerpt/location/confidence` 仍描述简历中的最高学历证据；嵌套对象独立描述第一学历，两个层次的原文和置信度可以不同。
+
+清晰分类（`bachelor_or_above` 或 `below_bachelor`）必须同时提供可定位简历原文和位置；证据不足、仅出现最高学历、顺序无法还原或事实冲突时返回 `unclear`，不得根据后来取得的最高学历推定第一学历。Python 仅在层级分类清楚、原文/位置可核验且置信度为 `high` 时将其作为硬门槛事实；`below_bachelor` 对应 `not_met`，建议 `do_not_advance_pending_human`；`bachelor_or_above` 对应 `met`。`unclear` 或非高置信证据进入 `second_review`。对学历事实冲突使用 `U03_CONFLICTING_FACTS`；其余首学历不明使用 `U06_BOUNDARY_CASE`，由 Python 映射机器状态。
+
+第一学历按简历教育经历中足以还原的时间顺序，识别中等职业教育及以上最早已完成或已取得的学历层次（如中专、职高、技校、大专、本科及以上）；在读、肄业、未取得毕业资格不算已取得学历。只有在读本科而无首个已取得学历记录时为 `unclear`，不能据此通过硬门槛。读取明确的学历层次原文和教育时间，不从学校品牌、校名、办学声誉或“全日制/非全日制”标签推断层级或顺序；后续自考、成人教育、在职等本科及以上学历不会改变较早的大专、中专等首段学历分类。只列出最高学历不能证明第一学历。
+
+该证据对象属于模型输入/中间证据契约；最终 `screening_record` 的状态、硬门槛和建议由 Python 确定性生成。机器建议仅为待人工确认的招聘辅助结果，不等于删除简历、拒绝候选人或 ATS 最终决定。`not_evidenced` 表示简历没有充分证据，不等于候选人不具备能力。
+
 ## 关键约束
 
-- 新记录固定使用 `schema_version: 1.2`、`jd_version: senior-fullstack-2026-08-14-v1` 与 `rubric_version: senior-fullstack-2026-09-11-v13`。校验器继续只读兼容 v12 及更早记录；旧记录应用新口径时必须重筛，不能原地改写。
-- v13 的 `priority_profile.qualification_dimensions` 只包含 `education`。学历 `not_met` 建议暂不推进，学历 `unclear` 进入二审。
+- 新记录固定使用 `schema_version: 1.2`、`jd_version: senior-fullstack-2026-08-14-v1` 与 `rubric_version: senior-fullstack-2026-09-14-v14`。校验器继续只读兼容 v13 及更早记录；旧记录应用新口径时必须重筛，不能原地改写。
+- v14 的 `priority_profile.qualification_dimensions` 包含既有 `education`（最高学历信息）与新增 `first_education`（首学历门槛）。最高学历字段仅描述简历记载，不单独决定状态或增加 `unmet_requirement_count`；硬门槛仅依据 `SEN-ADM-01.first_education`。高置信 `below_bachelor` 建议暂不推进待人工一审；只给最高学历、首学历/教育顺序不清、冲突或置信度不足进入二审。
 - `experience_fit_signal` 单独记录年限匹配状态；经验权重为 20%，但年限范围外、缺失或不清都不能单独触发暂不推进或二审。
 - `language_acceptance=resistant` 或 `employment_model=outsourcing_evidenced` 是明确排除信号；未写态度或未出现外包信息不得推断为负面。
 - `project_ownership_signal`、`ai_bonus_signal` 和 `logistics_experience` 只影响优先级、摘要和追问；物流经验不是强制项。
@@ -91,7 +116,7 @@
 - Schema 1.2 的人工终态必须记录带时区的 `level_1_reviewed_at`；需要二审时还必须记录 `level_2_reviewed_at`，且二审时间严格晚于一审。待审核状态的时间字段保持 `null`。
 - `strongest_matches` 和 `critical_gaps` 各不超过 3 条；`human_next_action` 只保留一个主动作。
 - `critical_gaps` 先按 `uncertainties` 的顺序概括决策相关待确认项，再用剩余位置记录非阻断缺口；结论渲染时不会重复显示前者。
-- 每个 criterion 恰好出现一次；`E0` 没有摘录，`E1`–`E3` 必须可定位。
+- 每个 criterion 恰好出现一次；`E0` 没有摘录，`E1`–`E3` 必须可定位。模型的 `SEN-ADM-01` 证据必须符合本文件“v14 第一学历证据契约”中的 `first_education` 结构。
 - 状态只允许 `supported`、`not_evidenced`、`conflicting`、`directly_not_met`。年限或学历硬门槛中的 `conflicting` 必须同时记录 `U03_CONFLICTING_FACTS` 并进入二审。`directly_not_met` 仅用于候选人的可定位直接反证，不能从“未写”推断。
 - 方向性建议依赖的证据归类置信度为 `low` 时必须转 `second_review`；除可选姓名外，记录不得包含电话、邮箱或身份证号等直接标识符。
 - 每个不确定性都必须包含决策影响和人工动作，并与 L2 原因码完全一致。

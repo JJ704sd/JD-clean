@@ -103,6 +103,14 @@ class MiniMaxClient:
             "temperature": 1.0,
             "top_p": 0.95,
         }
+        # MiniMax-M3 enables adaptive thinking when this field is omitted.
+        # The screening contract needs a compact evidence JSON response; with
+        # the long policy prompt, adaptive thinking can consume the completion
+        # budget and return an empty content field with finish_reason=length.
+        # Keep the behavior explicit for M3 while leaving other model dialects
+        # unchanged.
+        if model.strip().casefold() == "minimax-m3":
+            payload["thinking"] = {"type": "disabled"}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

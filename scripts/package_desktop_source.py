@@ -5,12 +5,18 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+
+sys.path.insert(0, str(ROOT))
+from resume_screening.versions import APP_VERSION  # noqa: E402
 
 
 def main():
     release = ROOT / "release"
     release.mkdir(exist_ok=True)
-    path = release / "ResumeDesk-0.2.0-preview-source.zip"
+    path = release / f"ResumeDesk-{APP_VERSION}-source.zip"
+    if path.exists():
+        raise SystemExit(f"Refusing to overwrite existing artifact: {path}")
     files = [
         ROOT / name for name in ("README.md", "pyproject.toml", "uv.lock", ".gitignore")
     ]

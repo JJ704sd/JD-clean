@@ -12,3 +12,8 @@ exports/
 build/
 dist/
 release/
+
+# Local screening evidence and run artifacts; never publish candidate data.
+logs/
+tmp/
+output docs/

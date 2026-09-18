@@ -15,7 +15,8 @@ SCHEMA_VERSION = "1.2"
 LEGACY_SCHEMA_VERSION = "1.1"
 EXPECTED_ROLE = "senior-fullstack-engineer"
 EXPECTED_JD_VERSION = "senior-fullstack-2026-08-14-v1"
-EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-09-11-v13"
+EXPECTED_RUBRIC_VERSION = "senior-fullstack-2026-09-14-v14"
+V13_RUBRIC_VERSION = "senior-fullstack-2026-09-11-v13"
 V12_RUBRIC_VERSION = "senior-fullstack-2026-09-11-v12"
 V11_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v11"
 V10_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v10"
@@ -39,6 +40,7 @@ COMPATIBILITY_PAIRS = {
     (SCHEMA_VERSION, V10_RUBRIC_VERSION),
     (SCHEMA_VERSION, V11_RUBRIC_VERSION),
     (SCHEMA_VERSION, V12_RUBRIC_VERSION),
+    (SCHEMA_VERSION, V13_RUBRIC_VERSION),
     (SCHEMA_VERSION, EXPECTED_RUBRIC_VERSION),
 }
 CRITERIA = (
@@ -149,6 +151,9 @@ V12_DIMENSION_CRITERIA = {
 V13_DIMENSION_CRITERIA = {
     "education": ("SEN-ADM-01", "E1"),
 }
+V14_DIMENSION_CRITERIA = {
+    "education": ("SEN-ADM-01", "E1"),
+}
 PRIORITY_SIGNAL_STATES = {"supported", "not_evidenced", "unclear"}
 SOURCE_FACT_CODES = {
     "U01_PARSE_QUALITY",
@@ -230,12 +235,15 @@ def _validate_evidence(record: dict[str, Any], errors: list[str]) -> dict[str, d
         return {}
 
     result: dict[str, dict[str, Any]] = {}
+    current_v14 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
     for index, item in enumerate(evidence):
         prefix = f"evidence[{index}]"
         if not isinstance(item, dict):
             errors.append(f"{prefix} must be an object")
             continue
         criterion = item.get("criterion_id")
+        if current_v14 and criterion != "SEN-ADM-01" and "first_education" in item:
+            errors.append(f"{prefix}.first_education is only allowed on SEN-ADM-01")
         if criterion not in CRITERIA:
             errors.append(f"{prefix}.criterion_id is not allowed for {EXPECTED_ROLE}")
         elif criterion in result:
@@ -273,6 +281,52 @@ def _validate_evidence(record: dict[str, Any], errors: list[str]) -> dict[str, d
     if len(evidence) != len(CRITERIA):
         errors.append(f"evidence must contain exactly {len(CRITERIA)} items")
     return result
+
+
+def _v14_first_education_state(
+    evidence: dict[str, Any], errors: list[str]
+) -> str:
+    detail = evidence.get("first_education")
+    if not isinstance(detail, dict):
+        errors.append("v14 SEN-ADM-01.first_education must be an object")
+        return "unclear"
+    if set(detail) != {"level", "excerpt", "location", "confidence"}:
+        errors.append("v14 first_education must contain exactly level, excerpt, location, confidence")
+
+    level = detail.get("level")
+    if level not in {"bachelor_or_above", "below_bachelor", "unclear"}:
+        errors.append("v14 first_education.level is invalid")
+        level = "unclear"
+    confidence = detail.get("confidence")
+    if confidence not in CONFIDENCES:
+        errors.append("v14 first_education.confidence is invalid")
+        confidence = "low"
+
+    excerpt = detail.get("excerpt")
+    location = detail.get("location")
+    if (excerpt is None) != (location is None):
+        errors.append("v14 first_education excerpt and location must both be present or null")
+    elif excerpt is not None:
+        if not _nonempty(excerpt) or not _nonempty(location):
+            errors.append("v14 first_education excerpt and location must be non-empty")
+
+    state = evidence.get("state")
+    if state == "conflicting":
+        if level != "unclear":
+            errors.append("conflicting first-education evidence must use level=unclear")
+        return "unclear"
+    if level == "unclear":
+        return "unclear"
+
+    if level == "bachelor_or_above" and state != "supported":
+        errors.append(
+            "v14 bachelor_or_above first education requires supported highest-education evidence"
+        )
+    if not _nonempty(excerpt) or not _nonempty(location):
+        errors.append("a classified v14 first education requires an excerpt and location")
+    if confidence != "high":
+        return "unclear"
+    return "met" if level == "bachelor_or_above" else "not_met"
 
 
 def _validate_uncertainties(record: dict[str, Any], errors: list[str]) -> list[str]:
@@ -347,6 +401,7 @@ def _validate_priority_profile(
         V10_RUBRIC_VERSION,
         V11_RUBRIC_VERSION,
         V12_RUBRIC_VERSION,
+        V13_RUBRIC_VERSION,
         EXPECTED_RUBRIC_VERSION,
     }
     profile_required = rubric_version in {
@@ -358,6 +413,7 @@ def _validate_priority_profile(
         V10_RUBRIC_VERSION,
         V11_RUBRIC_VERSION,
         V12_RUBRIC_VERSION,
+        V13_RUBRIC_VERSION,
         EXPECTED_RUBRIC_VERSION,
     }
     if profile is None and not profile_required:
@@ -371,13 +427,15 @@ def _validate_priority_profile(
         errors.append(f"priority_profile is missing field: {field}")
 
     target_stack = profile.get("target_stack")
-    current_v13 = rubric_version == EXPECTED_RUBRIC_VERSION
+    current_v13 = rubric_version == V13_RUBRIC_VERSION
+    current_v14 = rubric_version == EXPECTED_RUBRIC_VERSION
+    current_v13_or_v14 = current_v13 or current_v14
     current_v12 = rubric_version == V12_RUBRIC_VERSION
     current_v11 = rubric_version == V11_RUBRIC_VERSION
     current_v10 = rubric_version == V10_RUBRIC_VERSION
     current_v9 = rubric_version == V9_RUBRIC_VERSION
     current_v8 = rubric_version == V8_RUBRIC_VERSION
-    if current_v13 or current_v12 or current_v11 or current_v10:
+    if current_v13_or_v14 or current_v12 or current_v11 or current_v10:
         allowed_target_stacks = V10_TARGET_STACKS
     elif current_v9:
         allowed_target_stacks = V9_TARGET_STACKS
@@ -414,7 +472,7 @@ def _validate_priority_profile(
         )
     if (
         current_rubric
-        and not (current_v13 or current_v12 or current_v11 or current_v10)
+        and not (current_v13_or_v14 or current_v12 or current_v11 or current_v10)
         and target_stack == "go_present"
         and qualifying_backend
         and not qualifying_go
@@ -440,7 +498,7 @@ def _validate_priority_profile(
                 "priority_profile.target_stack conflicts with qualifying SEN-BE-01 Go evidence"
             )
     elif (
-        not (current_v13 or current_v12 or current_v11 or current_v10)
+        not (current_v13_or_v14 or current_v12 or current_v11 or current_v10)
         and (no_qualifying_stack or target_stack == "unclear")
         and qualifying_backend
     ):
@@ -470,14 +528,14 @@ def _validate_priority_profile(
             "priority_profile.logistics_experience must match qualifying SEN-DOMAIN-01 evidence"
         )
 
-    if not (current_v13 or current_v12 or current_v11 or current_v10) and "unclear" in {
+    if not (current_v13_or_v14 or current_v12 or current_v11 or current_v10) and "unclear" in {
         target_stack,
         profile.get("refactoring_experience"),
         profile.get("logistics_experience"),
     } and record.get("model_recommendation") != "second_review":
         errors.append("unclear priority signals require second review")
 
-    if current_v13:
+    if current_v13_or_v14:
         for field in (
             "qualification_dimensions",
             "unmet_requirement_count",
@@ -490,8 +548,10 @@ def _validate_priority_profile(
             if field not in profile:
                 errors.append(f"priority_profile is missing field: {field}")
         dimensions = profile.get("qualification_dimensions")
-        if not isinstance(dimensions, dict) or set(dimensions) != set(V13_DIMENSION_CRITERIA):
-            errors.append("qualification_dimensions does not match the v13 screening dimensions")
+        expected_keys = {"education", "first_education"} if current_v14 else set(V13_DIMENSION_CRITERIA)
+        if not isinstance(dimensions, dict) or set(dimensions) != expected_keys:
+            version = "v14" if current_v14 else "v13"
+            errors.append(f"qualification_dimensions does not match the {version} screening dimensions")
         else:
             education = evidence.get("SEN-ADM-01", {})
             expected_education = (
@@ -504,7 +564,17 @@ def _validate_priority_profile(
             )
             if dimensions.get("education") != expected_education:
                 errors.append("qualification_dimensions.education conflicts with evidence")
-            if profile.get("unmet_requirement_count") != int(expected_education == "not_met"):
+            expected_first_education = (
+                _v14_first_education_state(education, errors) if current_v14 else None
+            )
+            if current_v14 and dimensions.get("first_education") != expected_first_education:
+                errors.append("qualification_dimensions.first_education conflicts with SEN-ADM-01.first_education")
+            expected_unmet_count = (
+                int(expected_first_education == "not_met")
+                if current_v14
+                else int(expected_education == "not_met")
+            )
+            if profile.get("unmet_requirement_count") != expected_unmet_count:
                 errors.append("unmet_requirement_count must equal the number of not_met dimensions")
         if profile.get("experience_fit_signal") not in {
             "preferred_3_to_7_years",
@@ -840,14 +910,16 @@ def _validate_recommendation(
     record: dict[str, Any], evidence: dict[str, dict[str, Any]], probe_criteria: set[str], errors: list[str]
 ) -> None:
     recommendation = record.get("model_recommendation")
-    current_v13 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+    current_v13 = record.get("rubric_version") == V13_RUBRIC_VERSION
+    current_v14 = record.get("rubric_version") == EXPECTED_RUBRIC_VERSION
+    current_v13_or_v14 = current_v13 or current_v14
     current_v12 = record.get("rubric_version") == V12_RUBRIC_VERSION
     current_v11 = record.get("rubric_version") == V11_RUBRIC_VERSION
     current_v10 = record.get("rubric_version") == V10_RUBRIC_VERSION
     current_v9 = record.get("rubric_version") == V9_RUBRIC_VERSION
     current_v8 = record.get("rubric_version") == V8_RUBRIC_VERSION
     current_v8_or_v9 = current_v8 or current_v9
-    if current_v13 or current_v12 or current_v11 or current_v10:
+    if current_v13_or_v14 or current_v12 or current_v11 or current_v10:
         advance_minimums = V9_ADVANCE_MINIMUMS
         negative_core = V9_NEGATIVE_CORE
         direct_critical = V9_DIRECT_CRITICAL
@@ -864,7 +936,17 @@ def _validate_recommendation(
         negative_core = V7_NEGATIVE_CORE
         direct_critical = V7_DIRECT_CRITICAL
     if recommendation == "advance_pending_human":
-        if current_v13:
+        if current_v14:
+            profile = record.get("priority_profile", {})
+            dimensions = profile.get("qualification_dimensions", {}) if isinstance(profile, dict) else {}
+            if (
+                not isinstance(dimensions, dict)
+                or dimensions.get("first_education") != "met"
+                or profile.get("language_acceptance") == "resistant"
+                or profile.get("employment_model") == "outsourcing_evidenced"
+            ):
+                errors.append("v14 advance requires the first-education gate and no exclusion signal")
+        elif current_v13:
             profile = record.get("priority_profile", {})
             dimensions = profile.get("qualification_dimensions", {}) if isinstance(profile, dict) else {}
             if (
@@ -907,7 +989,7 @@ def _validate_recommendation(
             )
         )
         if ((current_v11 or current_v10) and v10_threshold_can_change) or (
-            not (current_v13 or current_v12 or current_v11 or current_v10)
+            not (current_v13_or_v14 or current_v12 or current_v11 or current_v10)
             and any(
                 evidence.get(criterion, {}).get("confidence") == "low"
                 for criterion in advance_minimums
@@ -919,7 +1001,7 @@ def _validate_recommendation(
             errors.append("missing AI evidence on an advance record requires an SEN-AI-01 interview probe")
         frontend = evidence.get("SEN-FE-01", {})
         if (
-            (current_v8_or_v9 or current_v10 or current_v11 or current_v12 or current_v13)
+            (current_v8_or_v9 or current_v10 or current_v11 or current_v12 or current_v13_or_v14)
             and (
                 frontend.get("state") != "supported"
                 or STRENGTH_RANK.get(frontend.get("strength"), -1)
@@ -943,6 +1025,19 @@ def _validate_recommendation(
         if isinstance(summary, dict) and not summary.get("critical_gaps"):
             errors.append("second_review requires at least one critical gap or pending item")
     elif recommendation == "do_not_advance_pending_human":
+        if current_v14:
+            profile = record.get("priority_profile", {})
+            dimensions = profile.get("qualification_dimensions", {}) if isinstance(profile, dict) else {}
+            hard_failure = isinstance(dimensions, dict) and dimensions.get("first_education") == "not_met"
+            exclusion = isinstance(profile, dict) and (
+                profile.get("language_acceptance") == "resistant"
+                or profile.get("employment_model") == "outsourcing_evidenced"
+            )
+            if not (hard_failure or exclusion):
+                errors.append("v14 negative recommendation requires first-education failure or an exclusion signal")
+            if isinstance(dimensions, dict) and dimensions.get("first_education") == "unclear":
+                errors.append("unclear v14 first-education gate requires second review")
+            return
         if current_v13:
             profile = record.get("priority_profile", {})
             dimensions = profile.get("qualification_dimensions", {}) if isinstance(profile, dict) else {}
@@ -1134,7 +1229,7 @@ def validate_record(record: Any, *, allow_human_finalized: bool = False) -> list
     ):
         errors.append("directly_not_met requires schema_version='1.2'")
     uncertainty_codes = _validate_uncertainties(record, errors)
-    if record.get("rubric_version") == EXPECTED_RUBRIC_VERSION:
+    if record.get("rubric_version") in {V13_RUBRIC_VERSION, EXPECTED_RUBRIC_VERSION}:
         conflict_items = [evidence.get("SEN-ADM-01", {})]
     elif record.get("rubric_version") == V12_RUBRIC_VERSION:
         conflict_items = [

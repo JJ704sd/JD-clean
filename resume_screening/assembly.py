@@ -45,6 +45,7 @@ V10_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v10"
 V11_RUBRIC_VERSION = "senior-fullstack-2026-09-04-v11"
 V12_RUBRIC_VERSION = "senior-fullstack-2026-09-11-v12"
 V13_RUBRIC_VERSION = "senior-fullstack-2026-09-11-v13"
+V14_RUBRIC_VERSION = "senior-fullstack-2026-09-14-v14"
 V10_DIMENSION_CRITERIA = {
     "education": ("SEN-ADM-01", "E1"),
     "logistics": ("SEN-DOMAIN-01", "E2"),
@@ -57,6 +58,7 @@ V12_DIMENSION_CRITERIA = {
 V13_DIMENSION_CRITERIA = {
     "education": ("SEN-ADM-01", "E1"),
 }
+V14_DIMENSION_KEYS = ("education", "first_education")
 UNCERTAINTY_CODES = {
     "U01_PARSE_QUALITY",
     "U02_MUST_HAVE_MISSING",
@@ -532,6 +534,47 @@ def _derive_v4_senior_evidence(value: list[Any]) -> list[dict[str, Any]]:
     return evidence
 
 
+def _first_education_gate(education: dict[str, Any]) -> str:
+    """Map explicit first-education evidence to the v14 hard-gate state."""
+
+    detail = education.get("first_education")
+    if not isinstance(detail, dict):
+        raise ValueError("SEN-ADM-01.first_education must be an object for v14")
+    level = detail.get("level")
+    if level not in {"bachelor_or_above", "below_bachelor", "unclear"}:
+        raise ValueError("SEN-ADM-01.first_education.level is invalid")
+    confidence = detail.get("confidence")
+    if confidence not in {"high", "medium", "low"}:
+        raise ValueError("SEN-ADM-01.first_education.confidence is invalid")
+
+    excerpt = detail.get("excerpt")
+    location = detail.get("location")
+    if (excerpt is None) != (location is None):
+        raise ValueError("SEN-ADM-01.first_education excerpt and location must be paired")
+    if excerpt is not None and (
+        not isinstance(excerpt, str)
+        or not excerpt.strip()
+        or not isinstance(location, str)
+        or not location.strip()
+    ):
+        raise ValueError("SEN-ADM-01.first_education excerpt/location must be non-empty")
+    if level in {"bachelor_or_above", "below_bachelor"} and excerpt is None:
+        raise ValueError("a clear first-education level requires an excerpt and location")
+
+    state = education.get("state")
+    if state == "conflicting":
+        return "unclear"
+    if confidence != "high":
+        return "unclear"
+    if level == "bachelor_or_above":
+        if state != "supported":
+            raise ValueError("bachelor_or_above first education requires supported SEN-ADM-01 education evidence")
+        return "met"
+    if level == "below_bachelor":
+        return "not_met"
+    return "unclear"
+
+
 def _uncertainty(
     code: str, description: str, decision_impact: str, action: str
 ) -> dict[str, str]:
@@ -707,6 +750,7 @@ def assemble_senior_record(
             V11_RUBRIC_VERSION,
             V12_RUBRIC_VERSION,
             V13_RUBRIC_VERSION,
+            V14_RUBRIC_VERSION,
         }
         else evidence_value
     )
@@ -714,13 +758,15 @@ def assemble_senior_record(
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
     current_v13 = rubric_version == V13_RUBRIC_VERSION
+    current_v14 = rubric_version == V14_RUBRIC_VERSION
+    current_v13_or_v14 = current_v13 or current_v14
     current_v12 = rubric_version == V12_RUBRIC_VERSION
     current_v11 = rubric_version == V11_RUBRIC_VERSION
     current_v10 = rubric_version == V10_RUBRIC_VERSION
     current_v9 = rubric_version == "senior-fullstack-2026-09-03-v9"
     current_v8 = rubric_version == "senior-fullstack-2026-09-01-v8"
     current_v8_or_v9 = current_v8 or current_v9
-    if current_v13 or current_v12 or current_v11 or current_v10:
+    if current_v13_or_v14 or current_v12 or current_v11 or current_v10:
         advance_minimums = V9_ADVANCE_MINIMUMS
         negative_core = V9_NEGATIVE_CORE
         direct_critical = V9_DIRECT_CRITICAL
@@ -810,7 +856,7 @@ def assemble_senior_record(
             )
         )
     )
-    if current_v13 or current_v12 or current_v11 or current_v10:
+    if current_v13_or_v14 or current_v12 or current_v11 or current_v10:
         if backend.get("state") == "conflicting" or backend.get("confidence") == "low":
             target_stack = "unclear"
         elif qualifying_go:
@@ -886,11 +932,11 @@ def assemble_senior_record(
             else "not_evidenced"
         ),
     }
-    language_resistant = (current_v13 or current_v12) and bool(
+    language_resistant = (current_v13_or_v14 or current_v12) and bool(
         LANGUAGE_RESISTANCE_PATTERN.search(resume_text)
         and not LANGUAGE_NON_RESISTANCE_PATTERN.search(resume_text)
     )
-    outsourcing_evidenced = (current_v13 or current_v12) and bool(
+    outsourcing_evidenced = (current_v13_or_v14 or current_v12) and bool(
         OUTSOURCING_PATTERN.search(resume_text)
         and not OUTSOURCING_NEGATION_PATTERN.search(resume_text)
     )
@@ -915,6 +961,77 @@ def assemble_senior_record(
         )
         priority_profile["qualification_dimensions"] = {"education": education_state}
         priority_profile["unmet_requirement_count"] = int(education_state == "not_met")
+        priority_profile["experience_fit_signal"] = experience_fit_signal
+        priority_profile["language_acceptance"] = (
+            "resistant" if language_resistant else "no_resistance_evidenced"
+        )
+        priority_profile["employment_model"] = (
+            "outsourcing_evidenced" if outsourcing_evidenced else "no_outsourcing_evidenced"
+        )
+        priority_profile["project_ownership_signal"] = (
+            "core_or_independent"
+            if _supported(level, "E2")
+            else "unclear"
+            if level.get("state") == "conflicting" or level.get("confidence") == "low"
+            else "not_evidenced"
+        )
+        ai = by_criterion.get("SEN-AI-01", {})
+        priority_profile["ai_bonus_signal"] = (
+            "supported"
+            if _supported(ai, "E2")
+            else "unclear"
+            if ai.get("state") == "conflicting" or ai.get("confidence") == "low"
+            else "not_evidenced"
+        )
+    elif current_v14:
+        education = by_criterion.get("SEN-ADM-01", {})
+        education_state = (
+            "unclear"
+            if education.get("state") == "conflicting" or education.get("confidence") == "low"
+            else "met"
+            if _supported(education, "E1")
+            else "not_met"
+        )
+        first_education_state = _first_education_gate(education)
+        if first_education_state == "unclear" and education.get("state") != "conflicting":
+            first_education = education["first_education"]
+            if first_education["confidence"] == "high":
+                _add_uncertainty(
+                    uncertainties,
+                    _uncertainty(
+                        "U06_BOUNDARY_CASE",
+                        "简历未能确认第一学历层次",
+                        "确认第一学历是否达到本科及以上会决定是否通过硬门槛",
+                        "回看原始简历并确认最早取得的高等教育学历层次",
+                    ),
+                )
+            else:
+                _add_uncertainty(
+                    uncertainties,
+                    _uncertainty(
+                        "U06_BOUNDARY_CASE",
+                        "第一学历证据置信度不足",
+                        "原文辨识结果可能改变第一学历硬门槛状态",
+                        "回看第一学历原文、位置和时间顺序",
+                    ),
+                )
+        experience = by_criterion.get("SEN-EXP-01", {})
+        experience_fit_signal = (
+            "unclear"
+            if experience.get("state") == "conflicting" or experience.get("confidence") == "low"
+            else "preferred_3_to_7_years"
+            if _supported(experience, "E2")
+            else "outside_preferred_range"
+            if experience.get("state") == "directly_not_met"
+            else "not_evidenced"
+        )
+        priority_profile["qualification_dimensions"] = {
+            key: state
+            for key, state in zip(
+                V14_DIMENSION_KEYS, (education_state, first_education_state), strict=True
+            )
+        }
+        priority_profile["unmet_requirement_count"] = int(first_education_state == "not_met")
         priority_profile["experience_fit_signal"] = experience_fit_signal
         priority_profile["language_acceptance"] = (
             "resistant" if language_resistant else "no_resistance_evidenced"
@@ -1013,6 +1130,9 @@ def assemble_senior_record(
         {criterion for criterion, _ in V13_DIMENSION_CRITERIA.values()}
         if current_v13
         else
+        set()
+        if current_v14
+        else
         {criterion for criterion, _ in V12_DIMENSION_CRITERIA.values()}
         if current_v12
         else
@@ -1052,9 +1172,20 @@ def assemble_senior_record(
             ),
         )
 
-    if current_v13:
+    if current_v13_or_v14:
         dimensions = priority_profile["qualification_dimensions"]
-        if not any(state == "unclear" for state in dimensions.values()):
+        relevant_dimensions = (
+            {"first_education": dimensions["first_education"]}
+            if current_v14
+            else dimensions
+        )
+        education_conflict = (
+            current_v14
+            and by_criterion.get("SEN-ADM-01", {}).get("state") == "conflicting"
+        )
+        if not education_conflict and not any(
+            state == "unclear" for state in relevant_dimensions.values()
+        ):
             uncertainties = [
                 item for item in uncertainties if item["code"] == "U11_UNTRUSTED_CONTENT"
             ]
@@ -1076,15 +1207,19 @@ def assemble_senior_record(
 
     if uncertainties:
         recommendation = "second_review"
-    elif current_v13:
+    elif current_v13_or_v14:
         if language_resistant or outsourcing_evidenced:
             recommendation = "do_not_advance_pending_human"
-        elif priority_profile["qualification_dimensions"]["education"] == "unclear":
+        elif priority_profile["qualification_dimensions"][
+            "first_education" if current_v14 else "education"
+        ] == "unclear":
             recommendation = "second_review"
         else:
             recommendation = (
                 "do_not_advance_pending_human"
-                if priority_profile["qualification_dimensions"]["education"] == "not_met"
+                if priority_profile["qualification_dimensions"][
+                    "first_education" if current_v14 else "education"
+                ] == "not_met"
                 else "advance_pending_human"
             )
     elif current_v12:
@@ -1143,7 +1278,7 @@ def assemble_senior_record(
             )
             recommendation = "second_review"
 
-    if current_v13 and recommendation == "advance_pending_human":
+    if current_v13_or_v14 and recommendation == "advance_pending_human":
         if priority_profile["experience_fit_signal"] != "preferred_3_to_7_years":
             _ensure_probe(probes, "SEN-EXP-01")
         if priority_profile["project_ownership_signal"] != "core_or_independent":
@@ -1175,7 +1310,7 @@ def assemble_senior_record(
     ):
         _ensure_probe(probes, "SEN-AI-01")
     if (
-        (current_v8_or_v9 or current_v10 or current_v11 or current_v12 or current_v13)
+        (current_v8_or_v9 or current_v10 or current_v11 or current_v12 or current_v13_or_v14)
         and recommendation == "advance_pending_human"
         and not _supported(by_criterion.get("SEN-FE-01", {}), "E2")
     ):
@@ -1213,7 +1348,9 @@ def assemble_senior_record(
         rationale = "存在决策相关不确定性，需按原因码完成人工二审后再决定。"
         next_action = "回看原始简历并按原因码完成二审。"
     elif recommendation == "advance_pending_human":
-        if current_v13:
+        if current_v14:
+            rationale = "第一学历达到本科及以上且未发现语言选择抵触或外包经历；3 至 7 年经验作为 20% 高权重评分项，不单独决定是否推进，独立/核心项目、AI 和物流经验用于优先排序。"
+        elif current_v13:
             rationale = "学历满足本科及以上且未发现语言选择抵触或外包经历；3 至 7 年经验作为 20% 高权重评分项，不单独决定是否推进，独立/核心项目、AI 和物流经验用于优先排序。"
         elif current_v12:
             rationale = "满足 3 至 7 年研发经验和本科及以上两项简历硬门槛，未发现语言选择抵触或外包经历；独立/核心项目、AI 深度使用或 AI 产品经验用于优先排序，物流经验为高影响非强制项。"
@@ -1227,7 +1364,16 @@ def assemble_senior_record(
             rationale = "Go 硬门槛及资深全栈核心证据达到推进标准，结论待人工一审核验。"
         next_action = "由招聘责任人核对原文位置和证据强度并完成人工一审。"
     else:
-        if current_v13:
+        if current_v14:
+            reasons = []
+            if priority_profile["qualification_dimensions"]["first_education"] == "not_met":
+                reasons.append("第一学历未达到本科及以上")
+            if language_resistant:
+                reasons.append("对语言选择或转语言明确犹豫/抵触")
+            if outsourcing_evidenced:
+                reasons.append("存在明确外包/驻场开发经历")
+            rationale = "；".join(reasons) + "，不符合当前全栈筛选硬门槛，结论待人工一审核验。"
+        elif current_v13:
             reasons = []
             if priority_profile["qualification_dimensions"]["education"] == "not_met":
                 reasons.append("学历未达到本科及以上")

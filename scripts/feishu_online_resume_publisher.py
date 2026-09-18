@@ -70,8 +70,6 @@ DEFAULT_STATE_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "
 DEFAULT_REPORT_PATH = DEFAULT_OUTPUT_DIRECTORY / "online-publish-report.json"
 DEFAULT_HISTORY_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "history.jsonl"
 DEFAULT_INDEX_NAME = "resume-index.md"
-DEFAULT_SCREENING_DATABASE = PROJECT_ROOT / "var" / "screening-v8.sqlite3"
-DEFAULT_SCREENING_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs"
 DEFAULT_SCREENING_MIN_SCORE = 70
 SCREENING_INDEX_MODES = ("shortlist", "all-scored")
 DEFAULT_SCREENING_INDEX_MODE = "shortlist"
@@ -95,8 +93,8 @@ class PublisherConfig:
     task_timeout_seconds: int = 180
     task_poll_seconds: float = 2.0
     screening_enabled: bool = False
-    screening_database: Path = DEFAULT_SCREENING_DATABASE
-    screening_output_directory: Path = DEFAULT_SCREENING_OUTPUT_DIRECTORY
+    screening_database: Path | None = None
+    screening_output_directory: Path | None = None
     screening_role: str = DEFAULT_SCREENING_ROLE
     screening_model: str = DEFAULT_SCREENING_MODEL
     screening_min_score: int = DEFAULT_SCREENING_MIN_SCORE
@@ -209,8 +207,14 @@ def _config_fingerprint(config: PublisherConfig) -> str:
         "today_only": config.today_only,
         "index_path": str(config.index_path),
         "screening_enabled": config.screening_enabled,
-        "screening_database": str(config.screening_database),
-        "screening_output_directory": str(config.screening_output_directory),
+        "screening_database": (
+            str(config.screening_database) if config.screening_database else None
+        ),
+        "screening_output_directory": (
+            str(config.screening_output_directory)
+            if config.screening_output_directory
+            else None
+        ),
         "screening_role": config.screening_role,
         "screening_model": config.screening_model,
         "screening_min_score": config.screening_min_score,
@@ -490,7 +494,11 @@ def _screened_index_rows(
     candidate ID or treat a queued/manual-review task as a passing result.
     """
 
-    if not published_items or not config.screening_database.is_file():
+    if (
+        not published_items
+        or config.screening_database is None
+        or not config.screening_database.is_file()
+    ):
         return [], None
     try:
         results = TaskStore(config.screening_database).successful_results()
@@ -573,8 +581,16 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
         "job_prefix": config.job_prefix,
         "screening": {
             "enabled": config.screening_enabled,
-            "database": str(config.screening_database),
-            "output_directory": str(config.screening_output_directory),
+            "database": (
+                str(config.screening_database)
+                if config.screening_database
+                else None
+            ),
+            "output_directory": (
+                str(config.screening_output_directory)
+                if config.screening_output_directory
+                else None
+            ),
             "role": config.screening_role,
             "model": config.screening_model,
             "min_score": config.screening_min_score,
@@ -606,6 +622,12 @@ def _screening_handoff(
 ) -> tuple[dict[str, Any], ScreeningQueueBridge | None]:
     if not config.screening_enabled:
         return {"status": "disabled", "error": "screening handoff is disabled"}, bridge
+    if config.screening_database is None or config.screening_output_directory is None:
+        return {
+            "status": "failed",
+            "error_code": "SCREENING_CONFIGURATION_MISSING",
+            "error": "screening requires a batch database and output directory",
+        }, bridge
     if config.dry_run:
         return {
             "status": "blocked",
@@ -657,6 +679,13 @@ def _save_report_and_history(config: PublisherConfig, report: dict[str, Any]) ->
 
 
 def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = None) -> dict[str, Any]:
+    if config.screening_enabled and (
+        config.screening_database is None
+        or config.screening_output_directory is None
+    ):
+        raise ValueError(
+            "screening requires a batch database and output directory"
+        )
     started_at = now_utc()
     state = _normalise_state(_load_json(config.state_path, _new_state()))
     report = _report_shell(config, started_at=started_at)
@@ -891,8 +920,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval-seconds", type=int, default=300)
     parser.add_argument("--task-timeout-seconds", type=int, default=180)
     parser.add_argument("--task-poll-seconds", type=float, default=2.0)
-    parser.add_argument("--screening-database", type=Path, default=None)
-    parser.add_argument("--screening-output", type=Path, default=None)
+    parser.add_argument(
+        "--screening-database",
+        type=Path,
+        default=None,
+        help="required with --screening; use the current batch database",
+    )
+    parser.add_argument(
+        "--screening-output",
+        type=Path,
+        default=None,
+        help="required with --screening; use the current batch output directory",
+    )
     parser.add_argument("--screening-role", choices=sorted(ROLE_VERSIONS), default=None)
     parser.add_argument("--screening-model", default=None)
     parser.add_argument(
@@ -917,19 +956,29 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
     output = _resolved(args.output_dir)
     index = _resolved(args.index_file) if args.index_file is not None else output / DEFAULT_INDEX_NAME
     folder_token = args.folder_token or os.environ.get("FEISHU_DOC_FOLDER_TOKEN", "").strip() or None
-    screening_database = _resolved(
-        Path(
-            args.screening_database
-            or os.environ.get("FEISHU_SCREENING_DATABASE", "").strip()
-            or DEFAULT_SCREENING_DATABASE
+    screening_database_value = args.screening_database or os.environ.get(
+        "FEISHU_SCREENING_DATABASE", ""
+    ).strip()
+    screening_output_value = args.screening_output or os.environ.get(
+        "FEISHU_SCREENING_OUTPUT_DIR", ""
+    ).strip()
+    if args.screening_enabled and not screening_database_value:
+        raise ValueError(
+            "--screening requires --screening-database or FEISHU_SCREENING_DATABASE"
         )
+    if args.screening_enabled and not screening_output_value:
+        raise ValueError(
+            "--screening requires --screening-output or FEISHU_SCREENING_OUTPUT_DIR"
+        )
+    screening_database = (
+        _resolved(Path(screening_database_value))
+        if screening_database_value
+        else None
     )
-    screening_output_directory = _resolved(
-        Path(
-            args.screening_output
-            or os.environ.get("FEISHU_SCREENING_OUTPUT_DIR", "").strip()
-            or DEFAULT_SCREENING_OUTPUT_DIRECTORY
-        )
+    screening_output_directory = (
+        _resolved(Path(screening_output_value))
+        if screening_output_value
+        else None
     )
     screening_role = (
         args.screening_role

@@ -1,0 +1,306 @@
+{
+  "schema_version": "1.4",
+  "screening_record_id": "sr-ops-v6-001",
+  "candidate_id": "candidate-ops-v6-001",
+  "candidate_name": "张三",
+  "role": "operations-devops-engineer",
+  "screening_basis": "provisional_baseline",
+  "jd_hard_gates_approved": false,
+  "jd_version": "operations-devops-engineer-2026-09-17-draft-v1",
+  "rubric_version": "operations-devops-rubric-2026-09-17-v1",
+  "screening_status": "non_final",
+  "recommendation": "second_review",
+  "summary": {
+    "conclusion_label": "建议二次复核",
+    "one_line_conclusion": "有 Linux 故障处置、模型网关和办公网络维护证据；最新岗位画像仍需双角色校准。",
+    "top_strengths": [
+      {
+        "criterion_id": "OPS-LINUX-01",
+        "finding": "能定位连接数异常并完成限流与验证"
+      },
+      {
+        "criterion_id": "OPS-MODEL-01",
+        "finding": "有模型超时切换和调用监控证据"
+      },
+      {
+        "criterion_id": "OPS-OFFICE-NET-01",
+        "finding": "有办公 VPN 权限配置和连接故障处理证据"
+      }
+    ],
+    "key_gaps": [
+      {
+        "criterion_id": "OPS-OBS-01",
+        "gap_type": "evidence_gap",
+        "finding": "简历未说明 SLO 口径与事故复盘闭环"
+      },
+      {
+        "criterion_id": "OPS-RAG-01",
+        "gap_type": "evidence_gap",
+        "finding": "简历未说明向量检索或 Agent 链路排查"
+      },
+      {
+        "criterion_id": "OPS-AI-GOV-01",
+        "gap_type": "evidence_gap",
+        "finding": "简历未说明 Token 台账和模型/Prompt 灰度回滚"
+      }
+    ],
+    "human_review_requirement": "岗位画像仍为 provisional_baseline，需先完成 JD 校准；之后由招聘责任人复核证据。",
+    "human_next_action": "请招聘负责人和用人经理确认最新 JD 的核心项、偏好项及缺失信息处理规则。"
+  },
+  "hard_gate_conflicts": [],
+  "evidence": [
+    {
+      "criterion_id": "OPS-EDU-01",
+      "criterion_name": "学历与专业",
+      "state": "supported",
+      "strength": "E1",
+      "excerpt": "计算机科学与技术，本科",
+      "location": "教育经历",
+      "rationale": "简历明确写出学历层次和专业；本次草稿尚未将其设为已批准 hard gate。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-EXP-01",
+      "criterion_name": "相关经验年限",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "2019.07-2025.08，负责平台运维、发布和办公 IT 支持",
+      "location": "工作经历",
+      "rationale": "任职时间和相关职责可定位；并行时段及职责比例仍需人工核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-LINUX-01",
+      "criterion_name": "Linux 与网络诊断",
+      "state": "supported",
+      "strength": "E3",
+      "excerpt": "通过 ss 和连接池指标定位连接未释放，增加超时回收并限流；发布后连接耗尽告警归零",
+      "location": "项目经历/订单平台",
+      "rationale": "有线上问题、个人诊断和处置动作，并描述了发布后的验证结果。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-ENV-01",
+      "criterion_name": "环境、资源与云平台",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "在阿里云 ECS、VPC 和安全组上开通测试环境，并维护环境参数清单",
+      "location": "工作经历/平台运维",
+      "rationale": "可定位云资源和环境交付动作；扩缩容与回收范围仍需追问。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-DB-01",
+      "criterion_name": "PostgreSQL、Redis 与消息队列",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "参与 PostgreSQL 迁移至托管 RDS，负责备份校验和只读切换",
+      "location": "项目经历/数据库迁移",
+      "rationale": "有迁移和备份校验动作；恢复演练及回退条件需核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-DELIVERY-01",
+      "criterion_name": "容器、CI/CD 与变更",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "维护 Docker Compose，并在 GitLab CI 增加镜像构建、部署前检查和回滚步骤",
+      "location": "工作经历/研发效能",
+      "rationale": "能定位容器和流水线个人工作；变更审批与归档深度待确认。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-OBS-01",
+      "criterion_name": "可观测、SLO 与事故闭环",
+      "state": "not_evidenced",
+      "strength": "E1",
+      "excerpt": "Prometheus、Grafana",
+      "location": "技能清单",
+      "rationale": "只有工具名，没有 SLO、响应分级或事故复盘闭环证据。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-SEC-DR-01",
+      "criterion_name": "安全、凭据、审计与灾备",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未提供主机加固、凭据管理或恢复演练的可定位证据。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-MODEL-01",
+      "criterion_name": "模型 API 与网关运维",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "为模型 API 增加超时和配额告警，供应商限流时切换备用接口",
+      "location": "项目经历/客服助手",
+      "rationale": "有模型网关治理、故障切换和监控动作；密钥轮换需核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-RAG-01",
+      "criterion_name": "向量检索、RAG 与 Agent 运行链路",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未说明向量检索、RAG 或 Agent 运行链路的排查和回归。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-AI-GOV-01",
+      "criterion_name": "AI 成本、效果和版本变更",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未说明 Token 台账、版本灰度对比或回滚。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-AUTO-COST-01",
+      "criterion_name": "自动化、IaC 与资源成本",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "用 Python 脚本回收过期测试环境，并输出资源回收报告",
+      "location": "项目经历/资源治理",
+      "rationale": "有脚本、资源治理动作和结果产物；权限护栏及节省归因需核对。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-COLLAB-01",
+      "criterion_name": "协作、文档与复盘",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "与开发、测试和产品共同维护发布检查表及回滚文档",
+      "location": "工作经历/发布流程",
+      "rationale": "有明确协作对象和文档产物；复盘闭环尚未说明。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-OWN-01",
+      "criterion_name": "项目独立承担与核心责任",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "作为运维接口人负责客服助手从预发到生产的发布链路",
+      "location": "项目经历/客服助手上线",
+      "rationale": "描述了端到端接口责任；实际决策边界和验收结果需核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-SCALE-01",
+      "criterion_name": "运维项目复杂度与业务/用户规模",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未提供带统计口径的业务量、用户量或依赖复杂度事实。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-AI-BONUS-01",
+      "criterion_name": "AI 深度使用与 AI 产品经验",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "参与 AI 客服产品从试点到上线，负责反馈收集和人工兜底流程迭代",
+      "location": "项目经历/客服助手",
+      "rationale": "有 AI 产品阶段、个人动作和迭代内容，区别于单纯模型调用运维。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-OUTSOURCE-01",
+      "criterion_name": "外包/派遣经历排除信号（非计分）",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历没有明确说明候选人的用工关系；缺失不产生不利结论。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-OFFICE-IT-01",
+      "criterion_name": "公司电脑与办公 IT 管理",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "负责 Windows 电脑发放、办公软件安装、故障排查、备份恢复和员工离职设备回收",
+      "location": "工作经历/办公 IT 支持",
+      "rationale": "覆盖设备交接、系统配置、故障和数据恢复等个人动作；资产台账深度待确认。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-OFFICE-NET-01",
+      "criterion_name": "办公网络与 VPN 管理",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "维护办公室无线网络和 VPN 账号权限，排查远程访问超时并完成连通性验证",
+      "location": "工作经历/办公网络",
+      "rationale": "有网络、VPN、权限和故障处理动作；安全策略与性能基线需追问。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-DOMAIN-01",
+      "criterion_name": "物流、供应链或跨境行业经验",
+      "state": "not_evidenced",
+      "strength": "E1",
+      "excerpt": "服务企业内部订单系统",
+      "location": "项目经历",
+      "rationale": "未明确证明物流、供应链或跨境行业背景；该项是加分项，缺失不构成负面结论。",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    {
+      "code": "U10_RUBRIC_AMBIGUITY",
+      "description": "岗位画像及 hard gate 尚未由招聘负责人和用人经理双签批准。",
+      "decision_impact": "本次只能整理 provisional evidence，不能依据学历、年限或外包规则形成不推进结论。",
+      "required_human_action": "由招聘负责人和用人经理确认最新 JD 的核心项、偏好项及缺失信息处理规则，并发布新版本。",
+      "requires_second_review": true
+    }
+  ],
+  "interview_probes": [
+    {
+      "criterion_id": "OPS-EXP-01",
+      "question": "请按任职时间说明哪些工作属于运维、DevOps、SRE 或平台工程职责，并解释并行时段如何计算。",
+      "expected_signal": "日期与职责边界清晰，重叠时段不重复累计。"
+    },
+    {
+      "criterion_id": "OPS-OFFICE-IT-01",
+      "question": "请说明一次办公电脑或设备故障的备份、重装、恢复和交接过程，你本人负责哪几项？",
+      "expected_signal": "能说明数据保护、系统处理、资产交接和恢复验证。"
+    },
+    {
+      "criterion_id": "OPS-OFFICE-NET-01",
+      "question": "VPN 或办公无线网络出现间歇性访问异常时，你如何区分账号权限、链路、DNS 和服务端问题？",
+      "expected_signal": "能给出分层定位、权限核对、安全约束和验证结果。"
+    },
+    {
+      "criterion_id": "OPS-RAG-01",
+      "question": "如果 RAG 检索质量突然下降，你会如何区分索引、向量召回、Prompt 和模型供应商问题？",
+      "expected_signal": "有分层追踪、回归集、指标和人工兜底思路。"
+    }
+  ],
+  "sensitive_attributes_used": false,
+  "human_review": {
+    "level_1_required": true,
+    "level_1_status": "pending",
+    "level_1_reviewer": null,
+    "level_1_decision": null,
+    "level_1_reviewed_at": null,
+    "level_2_required": true,
+    "level_2_status": "pending",
+    "level_2_mode": "independent_reviewer",
+    "level_2_reason_codes": ["U10_RUBRIC_AMBIGUITY"],
+    "independent_review_preferred": true,
+    "independent_review_fallback_reason": null,
+    "blind_review_required": true,
+    "blind_review_confirmed": null,
+    "level_2_reviewer": null,
+    "level_2_decision": null,
+    "level_2_reviewed_at": null,
+    "final_disposition": null,
+    "resolution": null
+  },
+  "automation_actions": []
+}

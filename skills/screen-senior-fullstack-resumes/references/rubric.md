@@ -1,6 +1,6 @@
 # 全栈工程师简历筛选 Rubric
 
-- 当前版本：`senior-fullstack-2026-09-11-v13`
+- 当前版本：`senior-fullstack-2026-09-14-v14`
 
 ## 证据强度
 
@@ -13,7 +13,7 @@
 
 ## 证据矩阵
 
-| ID | 维度 | v13 判断 | 用途 |
+| ID | 维度 | v14 判断 | 用途 |
 |---|---|---|---|
 | `SEN-EXP-01` | 应用研发年限 | 日期与研发职责支持 3–7 年为高匹配；明确范围外为 `directly_not_met` | 20% 高权重评分 |
 | `SEN-BE-01` | 后端与语言选择 | 记录真实后端交付，并保留对换语言/转栈的明确接受、犹豫或抵触原文 | 排除识别/追问 |
@@ -23,11 +23,11 @@
 | `SEN-AI-01` | AI 深度使用/产品经验 | AI 工作流、产品或工程项目有个人动作至少 `E2` | 加分 |
 | `SEN-DOMAIN-01` | 物流/供应链 | 物流业务项目有可归属个人的交付至少 `E2` | 高影响加分 |
 | `SEN-LEVEL-01` | 独立/核心项目责任 | 独立承担、主导关键链路或核心开发责任至少 `E2` | 重点优先 |
-| `SEN-ADM-01` | 学历 | 明确本科及以上，`E1` 即可 | 硬门槛 |
+| `SEN-ADM-01` | 第一学历 | 按可定位教育原文和足以还原的时间顺序识别中等职业教育及以上最早已完成或已取得的学历；在读、肄业、未取得毕业资格不算已取得学历。本科及以上且高置信为满足，大专/中专等且高置信为不满足；只有在读本科而无首个已取得学历记录、只提供最高学历或顺序不清时为 `unclear` | 硬门槛 |
 
 ## 决策规则
 
-`qualification_dimensions` 只包含 `education`，状态为 `met`、`not_met` 或 `unclear`。学历 `not_met` 生成 `do_not_advance_pending_human`；学历 `unclear` 进入 `second_review`。
+`qualification_dimensions` 包含 `education` 和 `first_education`。v14 的第一学历门槛以 `SEN-ADM-01.first_education` 为准：首段学历明确低于本科且证据高置信时为 `not_met`，建议 `do_not_advance_pending_human`；首段本科及以上且证据高置信时为 `met`；只有最高学历、学历顺序/首学历不清、事实冲突或证据置信度不足时为 `unclear` 并进入 `second_review`。后续学历提升不能覆盖首段学历。学校品牌与全日制标签不是学历层级或顺序的替代证据。
 
 `experience_fit_signal` 记录 `preferred_3_to_7_years`、`outside_preferred_range`、`not_evidenced` 或 `unclear`。经验维度权重为 20%；它显著影响总分和优先级，但任何经验状态都不能单独触发暂不推进或二审。
 
@@ -35,4 +35,4 @@
 
 `project_ownership_signal`、`ai_bonus_signal` 和 `logistics_experience` 只影响优先排序、摘要和追问，不单独改变推进状态。物流缺失不得作为硬缺口。
 
-确定性评分仍只表示 9 个证据维度的覆盖程度，不能替代硬门槛、排除信号或人工复核。
+确定性评分仍只表示 9 个证据维度的覆盖程度，不能替代硬门槛、排除信号或人工复核。机器建议不是删除简历或 ATS 最终决定；所有建议仍须人工确认。`not_evidenced` 仅表示简历没有提供充分证据，不代表候选人不具备相应能力。

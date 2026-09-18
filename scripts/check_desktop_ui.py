@@ -26,6 +26,10 @@ def main():
         record = store.prepare(source, "senior-fullstack-engineer")
         window = tk.Tk()
         app = DesktopApp(window, root / "data")
+        window.update_idletasks()
+        window.lift()
+        window.attributes("-topmost", True)
+        window.focus_force()
         app.documents.selection_set(record["id"])
         window.update()
 
@@ -38,6 +42,7 @@ def main():
                 window.winfo_rooty() + window.winfo_height(),
             )
             ImageGrab.grab(bbox=box).save(output / "desktop-ui.png")
+            window.attributes("-topmost", False)
             window.destroy()
 
         window.after(1200, capture)

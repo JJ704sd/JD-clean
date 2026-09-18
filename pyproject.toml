@@ -1,6 +1,6 @@
 [project]
 name = "resume-screening"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Auditable one-resume-per-model-call screening pipeline"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -13,7 +13,17 @@ dependencies = [
 ]
 
 [tool.uv]
-package = false
+package = true
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "resume_screening.versions.APP_VERSION" }
+
+[tool.setuptools]
+packages = ["resume_screening"]
 
 [dependency-groups]
 build = [

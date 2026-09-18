@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "role": "business-system-operations-engineer",
+  "jd_version": "business-system-operations-engineer-2026-09-18-draft-v1",
+  "rubric_version": "business-system-operations-rubric-2026-09-18-v1",
+  "jd_hard_gates_approved": false,
+  "approved_by": [],
+  "criteria": [
+    {"criterion_id":"BSO-EXP-01","requirement_text":"有系统运维、应用支持、软件实施、IT 服务台或相关经验","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-INTAKE-01","requirement_text":"能承接操作、销售、客服等业务用户的问题并澄清现象、影响和诉求","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-TROUBLE-01","requirement_text":"能结合业务流程、权限、配置、浏览器、网络和报错开展初步排查与操作指导","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-TRACK-01","requirement_text":"能完整记录问题并跟进到解决和用户确认","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-ESCALATE-01","requirement_text":"能准确区分并转交缺陷、需求、数据异常和复杂技术问题","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-MAINT-01","requirement_text":"能按审批和变更流程完成账号、权限、基础数据和配置维护","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-CONTINUITY-01","requirement_text":"能按影响范围和紧急程度保障关键业务流程并同步进展","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-KB-01","requirement_text":"能沉淀问题分析、操作指南、FAQ 和知识库内容","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-IMPROVE-01","requirement_text":"能分析高频问题并参与上线验证、体验和流程改进","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-SERVICE-01","requirement_text":"沟通清晰、耐心细致并能安排支持优先级","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-SEC-01","requirement_text":"具备账号权限、业务数据、系统配置和变更管理的信息安全意识","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-COLLAB-01","requirement_text":"能与产品、项目、研发协作并准确描述缺陷、需求和技术问题","category":"requires_calibration","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-ENTERPRISE-01","requirement_text":"有 ERP、CRM、OA、客服或其他企业业务系统经验","category":"bonus","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-DATA-01","requirement_text":"掌握基础 SQL 查询、日志检索或数据核查方法","category":"bonus","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-TICKET-01","requirement_text":"有工单管理、问题分级、服务台运营或知识库建设经验","category":"bonus","owner":"hiring_manager","approved":false},
+    {"criterion_id":"BSO-TRAINING-01","requirement_text":"有用户培训、操作手册编写或系统上线支持经验","category":"bonus","owner":"hiring_manager","approved":false}
+  ]
+}

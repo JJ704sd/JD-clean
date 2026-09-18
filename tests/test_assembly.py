@@ -108,6 +108,129 @@ class SeniorRecordAssemblyTests(unittest.TestCase):
         self.assertEqual(score_record(record).components["SEN-EXP-01"], 20)
         self.assertEqual(validate_record(ROOT, record["role"], record), [])
 
+    def test_v14_first_associate_then_later_bachelor_fails_first_education_gate(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：本科（专升本）",
+            location="教育经历",
+            rationale="最高学历达到本科，但首段教育经历需单独核验",
+            confidence="high",
+            first_education={
+                "level": "below_bachelor",
+                "excerpt": "2012–2015 大专，2016–2018 专升本本科",
+                "location": "教育经历",
+                "confidence": "high",
+            },
+        )
+        record = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+
+        dimensions = record["priority_profile"]["qualification_dimensions"]
+        self.assertEqual(dimensions, {"education": "met", "first_education": "not_met"})
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 1)
+        self.assertEqual(record["model_recommendation"], "do_not_advance_pending_human")
+        self.assertIn("第一学历未达到本科及以上", record["recommendation_rationale"])
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v14_first_bachelor_passes_and_highest_degree_alone_requires_second_review(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：硕士",
+            location="教育经历",
+            rationale="简历明确记载最高学历",
+            confidence="high",
+        )
+        education["first_education"] = {
+            "level": "bachelor_or_above",
+            "excerpt": "2012–2016 本科",
+            "location": "教育经历",
+            "confidence": "high",
+        }
+        passed = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+        self.assertEqual(
+            passed["priority_profile"]["qualification_dimensions"],
+            {"education": "met", "first_education": "met"},
+        )
+        self.assertEqual(passed["model_recommendation"], "advance_pending_human")
+        self.assertEqual(validate_record(ROOT, passed["role"], passed), [])
+
+        education["first_education"] = {
+            "level": "unclear",
+            "excerpt": None,
+            "location": None,
+            "confidence": "low",
+        }
+        uncertain = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+        self.assertEqual(
+            uncertain["priority_profile"]["qualification_dimensions"],
+            {"education": "met", "first_education": "unclear"},
+        )
+        self.assertEqual(uncertain["model_recommendation"], "second_review")
+        self.assertIn("U06_BOUNDARY_CASE", {item["code"] for item in uncertain["uncertainties"]})
+        self.assertEqual(validate_record(ROOT, uncertain["role"], uncertain), [])
+
+    def test_v14_uncertain_below_bachelor_excerpt_is_not_automatically_rejected(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：本科",
+            location="教育经历",
+            rationale="简历记载最高学历为本科",
+            confidence="high",
+            first_education={
+                "level": "below_bachelor",
+                "excerpt": "曾就读大专，日期无法辨识",
+                "location": "教育经历",
+                "confidence": "medium",
+            },
+        )
+        record = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["first_education"],
+            "unclear",
+        )
+        self.assertEqual(record["model_recommendation"], "second_review")
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v14_missing_first_education_object_is_invalid_model_output(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.pop("first_education", None)
+
+        with self.assertRaisesRegex(ValueError, "first_education must be an object"):
+            assemble(
+                {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+                rubric_version="senior-fullstack-2026-09-14-v14",
+            )
+
     def test_v12_out_of_range_experience_is_a_hard_failure(self):
         source = documented_senior_record()
         experience = next(

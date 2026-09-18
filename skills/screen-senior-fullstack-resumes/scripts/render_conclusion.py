@@ -103,9 +103,12 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
         names = {
             "experience_range": "3–7 年经验",
             "education": "学历",
+            "first_education": "第一学历",
             "logistics": "物流",
             "valuable_project": "高含金量项目",
         }
+        if record.get("rubric_version") == "senior-fullstack-2026-09-14-v14":
+            names["education"] = "最高学历"
         if "language_learning" in dimensions:
             names["language_learning"] = "语言/学习"
         states = {"met": "满足", "not_met": "不符合", "unclear": "待确认"}
@@ -117,6 +120,7 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
         if record.get("rubric_version") in {
             "senior-fullstack-2026-09-11-v12",
             "senior-fullstack-2026-09-11-v13",
+            "senior-fullstack-2026-09-14-v14",
         }:
             stack = "；".join(
                 (
@@ -157,7 +161,10 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
 
 def _column_labels(record: dict[str, Any]) -> tuple[str, str]:
     rubric_version = record.get("rubric_version")
-    if rubric_version == "senior-fullstack-2026-09-11-v13":
+    if rubric_version in {
+        "senior-fullstack-2026-09-11-v13",
+        "senior-fullstack-2026-09-14-v14",
+    }:
         return "排除信号", "硬门槛与评分"
     if rubric_version == "senior-fullstack-2026-09-11-v12":
         return "排除信号", "硬门槛与加分"

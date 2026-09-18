@@ -12,7 +12,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .desktop_store import ReviewStore, atomic_text, now, resource_root
+from keyring.errors import KeyringError, PasswordDeleteError
+
+from .desktop_store import ReviewStore, atomic_text, resource_root
 from .minimax import (
     AmbiguousModelError,
     ModelCallError,
@@ -22,7 +24,7 @@ from .minimax import (
 )
 from .pipeline import ScreeningPipeline
 from .queue import TaskSpec, TaskStore
-from .versions import ROLE_VERSIONS
+from .versions import AI_OUTPUT_CONTRACT_VERSION, ROLE_VERSIONS
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,12 @@ class ModelConfig:
             ).encode()
         ).hexdigest()
 
+    @property
+    def endpoint_identity(self):
+        """A non-secret endpoint label safe for snapshots and audit exports."""
+
+        return self._validated_base()
+
 
 @dataclass(frozen=True)
 class AnalysisResult:
@@ -100,6 +108,8 @@ class AnalysisResult:
     status: str
     folder: Path
     error_code: str | None = None
+    run_id: str | None = None
+    batch_id: str | None = None
 
     def __iter__(self):
         # Preserve the original ``status, folder = run_analysis(...)`` API.
@@ -124,17 +134,31 @@ def credential_backend():
 
 def save_config(root: Path, config: ModelConfig, key: str):
     _ = config.endpoint
-    backend = credential_backend()
     value = key.strip()
     if value:
-        backend.set_password("ResumeDesk", config.credential_identity, value)
-    else:
-        value = _saved_credential(backend, config)
-    if not value:
-        raise ValueError("请填写 API Key")
+        credential_backend().set_password("ResumeDesk", config.credential_identity, value)
     atomic_text(
         root / "model.json", json.dumps(asdict(config), ensure_ascii=False, indent=2)
     )
+
+
+def clear_saved_credential(config: ModelConfig) -> bool:
+    """Delete both the endpoint and legacy model-scoped OS credentials."""
+
+    backend = credential_backend()
+    removed = False
+    for identity in dict.fromkeys((config.credential_identity, config.identity)):
+        try:
+            backend.delete_password("ResumeDesk", identity)
+            removed = True
+        except PasswordDeleteError:
+            continue
+    return removed
+
+
+# Descriptive aliases used by settings and automation callers.
+delete_saved_credential = clear_saved_credential
+clear_credential = clear_saved_credential
 
 
 def load_config(root: Path):
@@ -168,7 +192,7 @@ def saved_credential_available(config: ModelConfig) -> bool:
 
     try:
         return bool(_saved_credential(credential_backend(), config))
-    except Exception:  # noqa: BLE001 -- status display must not block local use.
+    except (KeyringError, ValueError):
         return False
 
 
@@ -182,7 +206,7 @@ def _saved_credential(backend, config: ModelConfig):
     if legacy:
         try:
             backend.set_password("ResumeDesk", config.credential_identity, legacy)
-        except Exception:  # noqa: BLE001 -- legacy read still remains usable.
+        except KeyringError:
             return legacy
     return legacy
 
@@ -353,7 +377,14 @@ def _extract_model_names(payload):
     return names
 
 
-def run_analysis(store: ReviewStore, document_id, config: ModelConfig, client):
+def run_analysis(
+    store: ReviewStore,
+    document_id,
+    config: ModelConfig,
+    client,
+    *,
+    batch_id: str | None = None,
+):
     record = store.get(document_id)
     if record["status"] not in ("待人工审阅", "人工审阅完成"):
         raise ValueError("材料尚未整理成功")
@@ -362,13 +393,17 @@ def run_analysis(store: ReviewStore, document_id, config: ModelConfig, client):
     folder.mkdir(parents=True)
     snapshot = asdict(config)
     snapshot["config_identity"] = config.identity
+    snapshot["endpoint_identity"] = config.endpoint_identity
     snapshot["role_versions"] = ROLE_VERSIONS[record["role"]]
+    snapshot["output_contract_version"] = AI_OUTPUT_CONTRACT_VERSION
     atomic_text(folder / "run.json", json.dumps(snapshot, ensure_ascii=False, indent=2))
-    with closing(store.connect()) as db, db:
-        db.execute(
-            "INSERT INTO ai_runs VALUES (?,?,?,?,?,?)",
-            (run_id, document_id, json.dumps(snapshot), "处理中", str(folder), now()),
-        )
+    store.create_ai_run(
+        run_id,
+        document_id,
+        config_snapshot=snapshot,
+        directory=folder,
+        batch_id=batch_id,
+    )
     status = "请求状态待核对"
     try:
         tasks = TaskStore(folder / "queue.sqlite3")
@@ -392,13 +427,76 @@ def run_analysis(store: ReviewStore, document_id, config: ModelConfig, client):
             client=client,
             output_root=folder / "outputs",
             project_root=resource_root(),
+            result_metadata={
+                "provider": config.provider,
+                "endpoint_identity": config.endpoint_identity,
+                "model": config.model,
+            },
         ).process_next()
         status = result.status if result else "未开始"
+        if result is not None:
+            envelope = tasks.result(result.task_id)
+            raw_path = folder / "outputs" / document_id / "raw-response.json"
+            normalized_path = folder / "outputs" / document_id / "normalized-output.json"
+            validation_path = folder / "outputs" / document_id / "manual-review.json"
+            if status == "succeeded":
+                ai_result = envelope["ai_result"]
+                raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+                store.save_ai_result(
+                    run_id=run_id,
+                    document_id=document_id,
+                    output_contract_version=ai_result.get(
+                        "output_contract_version", AI_OUTPUT_CONTRACT_VERSION
+                    ),
+                    input_redacted_sha256=ai_result.get("input_redacted_sha256", ""),
+                    raw_response=raw_payload,
+                    normalized_output=ai_result,
+                )
+                store.update_ai_run(
+                    run_id,
+                    status=status,
+                    contract_version=ai_result.get("output_contract_version"),
+                    input_redacted_sha256=ai_result.get("input_redacted_sha256"),
+                    raw_response_path=str(raw_path),
+                    normalized_output_path=str(normalized_path),
+                    model_recommendation=ai_result.get("model_recommendation"),
+                    ai_band=ai_result.get("computed_score", {}).get("band"),
+                    primary_risk=(
+                        [
+                            risk
+                            for criterion in ai_result.get("criteria", [])
+                            for risk in criterion.get("risks", [])
+                        ]
+                        or ai_result.get("uncertainty_reasons")
+                        or [""]
+                    )[0],
+                    batch_item_status="成功" if status == "succeeded" else "需人工核对",
+                    error="" if status == "succeeded" else "结果进入人工核对",
+                )
+                store.mark_model_real_call(config, role=record["role"])
+            else:
+                store.update_ai_run(
+                    run_id,
+                    status=status,
+                    validation_error_path=str(validation_path) if validation_path.exists() else None,
+                    batch_item_status=(
+                        "失败" if status == "retryable_failed" else "需人工核对"
+                    ),
+                    error=(result.error_code or "结果未生成"),
+                )
+        else:
+            store.update_ai_run(run_id, status=status, batch_item_status="失败", error="未开始")
         return AnalysisResult(
             status=status,
             folder=folder,
             error_code=result.error_code if result else None,
+            run_id=run_id,
+            batch_id=batch_id,
         )
     finally:
-        with closing(store.connect()) as db, db:
-            db.execute("UPDATE ai_runs SET status=? WHERE id=?", (status, run_id))
+        # A failure before the queue returns is still durable and visible, but
+        # never overwrites a richer status already written above.
+        with closing(store.connect()) as db:
+            row = db.execute("SELECT status FROM ai_runs WHERE id=?", (run_id,)).fetchone()
+        if row and row[0] == "处理中":
+            store.update_ai_run(run_id, status=status, batch_item_status="需人工核对")

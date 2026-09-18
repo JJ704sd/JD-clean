@@ -90,8 +90,14 @@ def _validate_explicit_role(path: Path, role: str) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="resume-screening")
-    parser.add_argument("--database", default="var/screening-v8.sqlite3")
-    parser.add_argument("--output", default="outputs")
+    parser.add_argument(
+        "--database",
+        help="required batch-specific SQLite database; defaults are intentionally disabled",
+    )
+    parser.add_argument(
+        "--output",
+        help="required batch-specific worker output directory",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     enqueue = subparsers.add_parser("enqueue", help="登记简历任务")
@@ -169,7 +175,7 @@ def _parser() -> argparse.ArgumentParser:
     retry.add_argument("--task-id", type=int)
 
     export = subparsers.add_parser("export", help="导出成功结果")
-    export.add_argument("--directory", default="exports")
+    export.add_argument("--directory", help="required batch-specific export directory")
 
     validate = subparsers.add_parser("validate", help="校验 screening.json")
     validate.add_argument("path")
@@ -628,8 +634,29 @@ def main(argv: list[str] | None = None) -> int:
     _configure_console_encoding()
     parser = _parser()
     args = parser.parse_args(argv)
-    store = TaskStore(args.database)
     try:
+        if args.command == "validate":
+            return _validate(args)
+        if not args.database:
+            print(
+                "Error: pass --database for the current screening batch; no shared default database is used.",
+                file=sys.stderr,
+            )
+            return 2
+        if args.command == "worker" and not args.output:
+            print(
+                "Error: pass --output for the current screening batch.",
+                file=sys.stderr,
+            )
+            return 2
+        if args.command == "export" and not args.directory:
+            print(
+                "Error: pass --directory for the current screening batch export.",
+                file=sys.stderr,
+            )
+            return 2
+
+        store = TaskStore(args.database)
         if args.command == "enqueue":
             return _enqueue(args, store)
         if args.command == "worker":
@@ -644,8 +671,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "export":
             return _export(args, store)
-        if args.command == "validate":
-            return _validate(args)
         if args.command in {"calibrate", "calibration"}:
             return _calibrate(args, store)
     except (OSError, ValueError, json.JSONDecodeError) as exc:

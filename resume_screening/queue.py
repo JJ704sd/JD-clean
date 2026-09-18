@@ -20,6 +20,7 @@ from .versions import (
     ACTIVE_CONTRACTS,
     PROMPT_VERSION,
     SCORING_VERSION,
+    contract_for_role,
     contract_matches,
 )
 
@@ -111,10 +112,21 @@ class TaskSpec:
     rubric_version: str
     candidate_name: str | None = None
     model: str = "MiniMax-M3"
-    parser_version: str = PARSER_VERSION
-    scoring_version: str = SCORING_VERSION
-    prompt_version: str = PROMPT_VERSION
+    parser_version: str | None = None
+    scoring_version: str | None = None
+    prompt_version: str | None = None
     source_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        """Fill omitted versions from the role-specific active contract."""
+
+        contract = contract_for_role(self.role)
+        if self.parser_version is None:
+            object.__setattr__(self, "parser_version", contract[2])
+        if self.scoring_version is None:
+            object.__setattr__(self, "scoring_version", contract[3])
+        if self.prompt_version is None:
+            object.__setattr__(self, "prompt_version", contract[4])
 
 
 @dataclass(frozen=True)

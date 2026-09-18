@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import os
 import unittest
 from pathlib import Path
 from dataclasses import replace
@@ -275,6 +276,35 @@ class OnlineResumePublisherTests(unittest.TestCase):
             self.assertEqual(config.screening_database, (root / "screening.sqlite3").resolve())
             self.assertEqual(config.screening_output_directory, (root / "screening-output").resolve())
 
+    def test_screening_requires_batch_database_and_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base_args = ["--screening", "--source-dir", str(root / "downloads")]
+
+            with patch.dict(
+                os.environ, {"USERPROFILE": str(root)}, clear=True
+            ):
+                missing_database = _parser().parse_args(base_args)
+                with self.assertRaisesRegex(ValueError, "screening-database"):
+                    _config_from_args(missing_database)
+
+                missing_output = _parser().parse_args(
+                    base_args
+                    + ["--screening-database", str(root / "screening.sqlite3")]
+                )
+                with self.assertRaisesRegex(ValueError, "screening-output"):
+                    _config_from_args(missing_output)
+
+    def test_programmatic_screening_requires_batch_paths_before_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self._config(root, dry_run=True), screening_enabled=True)
+
+            with self.assertRaisesRegex(ValueError, "batch database and output"):
+                run_cycle(config)
+
+            self.assertFalse(config.state_path.exists())
+
     def test_screening_min_score_is_configurable_and_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -287,6 +317,10 @@ class OnlineResumePublisherTests(unittest.TestCase):
                     "all-scored",
                     "--source-dir",
                     str(root / "downloads"),
+                    "--screening-database",
+                    str(root / "screening.sqlite3"),
+                    "--screening-output",
+                    str(root / "screening-output"),
                 ]
             )
             config = _config_from_args(args)
@@ -300,6 +334,10 @@ class OnlineResumePublisherTests(unittest.TestCase):
                     "101",
                     "--source-dir",
                     str(root / "downloads"),
+                    "--screening-database",
+                    str(root / "screening.sqlite3"),
+                    "--screening-output",
+                    str(root / "screening-output"),
                 ]
             )
             with self.assertRaisesRegex(ValueError, "0 to 100"):
@@ -385,6 +423,49 @@ class OnlineResumePublisherTests(unittest.TestCase):
             relative.assert_called_once_with(markdown)
             import_args = cli.run.call_args_list[0].args[0]
             self.assertEqual(import_args[3], "output/resume.feishu.md")
+
+    def test_cli_import_accepts_feishu_h1_heading_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self._config(root, dry_run=False)
+            markdown = root / "outputs" / "resume.feishu.md"
+            markdown.parent.mkdir(parents=True)
+            markdown.write_text("# resume", encoding="utf-8")
+            content = "\n".join(
+                [
+                    "# 基本信息",
+                    "# 个人简介",
+                    "# 教育经历",
+                    "# 工作经历",
+                    "# 项目经历",
+                    "# 技能",
+                    "# 证书与语言能力",
+                    "# 其他信息",
+                ]
+            )
+            cli = Mock()
+            cli.run.side_effect = [
+                SimpleNamespace(
+                    ok=True,
+                    payload={"ok": True, "url": "https://example.feishu.cn/docx/h1"},
+                    diagnostic="",
+                ),
+                SimpleNamespace(
+                    ok=True,
+                    payload={"ok": True, "data": {"document": {"content": content}}},
+                    diagnostic="",
+                ),
+            ]
+            importer = OnlineFeishuImporter(config, cli=cli)
+
+            with patch(
+                "scripts.feishu_online_resume_publisher.relative_to_root",
+                return_value="output/resume.feishu.md",
+            ):
+                result = importer.import_and_readback(markdown, "Candidate-resume")
+
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(result["readback_nonempty"])
 
 
 if __name__ == "__main__":

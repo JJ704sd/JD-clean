@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -11,6 +12,7 @@ ROLE_SKILL_DIRS = {
     "ai-product-manager": "screen-ai-product-manager-resumes",
     "senior-fullstack-engineer": "screen-senior-fullstack-resumes",
     "fullstack-development-intern": "screen-fullstack-intern-resumes",
+    "operations-devops-engineer": "screen-operations-devops-resumes",
 }
 
 
@@ -19,7 +21,15 @@ def _load_module(path: Path, name: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load module: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module_directory = str(path.parent)
+    inserted = module_directory not in sys.path
+    if inserted:
+        sys.path.insert(0, module_directory)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if inserted:
+            sys.path.remove(module_directory)
     return module
 
 

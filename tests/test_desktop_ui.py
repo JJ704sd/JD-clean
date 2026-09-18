@@ -4,6 +4,7 @@ import tempfile
 import time
 import tkinter as tk
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -47,6 +48,7 @@ class DesktopUITests(unittest.TestCase):
         self.assertIn("Python", review["evidence"])
         self.assertEqual(self.app.store.get(record["id"])["status"], "待人工审阅")
         self.assertFalse(self.app.dirty)
+        self.assertIsNone(self.app.autosave_id)
         with (
             patch("tkinter.messagebox.askokcancel", return_value=False),
             patch.object(self.app, "start_job") as job,
@@ -92,6 +94,144 @@ class DesktopUITests(unittest.TestCase):
         self.assertEqual(self.app.documents.get_children(), (failed_row["id"],))
         self.assertNotIn(senior_row["id"], self.app.documents.get_children())
 
+    def test_ai_priority_sort_reorders_existing_rows(self):
+        rows = []
+        for index in range(3):
+            source = self.directory / f"resume-{index}.txt"
+            source.write_text(TEXT + f" Synthetic {index}", encoding="utf-8")
+            rows.append(self.app.store.prepare(source, "senior-fullstack-engineer"))
+        with closing(self.app.store.connect()) as db, db:
+            db.executemany(
+                "UPDATE documents SET ai_status=? WHERE id=?",
+                [
+                    ("成功", rows[0]["id"]),
+                    ("需人工核对", rows[1]["id"]),
+                    ("处理中", rows[2]["id"]),
+                ],
+            )
+
+        self.app.sort_by.set("AI 优先级")
+        self.window.update()
+
+        self.assertEqual(
+            self.app.documents.get_children(),
+            (rows[1]["id"], rows[2]["id"], rows[0]["id"]),
+        )
+
+    def test_reset_review_clears_selection_after_local_data_clear(self):
+        source = self.directory / "synthetic.txt"
+        source.write_text(TEXT, encoding="utf-8")
+        row = self.app.store.prepare(source, "senior-fullstack-engineer")
+        self.app.refresh()
+        self.app.documents.selection_set(row["id"])
+        self.window.update()
+        self.assertEqual(self.app.selected_documents, {row["id"]})
+
+        self.app.store.clear_all_data()
+        self.app.reset_review()
+
+        self.assertEqual(self.app.selected_documents, set())
+        self.assertIsNone(self.app.autosave_id)
+
+    def test_refresh_prunes_selection_for_removed_document(self):
+        source = self.directory / "synthetic.txt"
+        source.write_text(TEXT, encoding="utf-8")
+        row = self.app.store.prepare(source, "senior-fullstack-engineer")
+        self.app.refresh()
+        self.app.documents.selection_set(row["id"])
+        self.window.update()
+        self.app.store.delete_document(row["id"])
+
+        self.app.refresh()
+
+        self.assertNotIn(row["id"], self.app.selected_documents)
+        self.assertIsNone(self.app.autosave_id)
+
+    def test_stopped_import_preserves_preview_reason_codes(self):
+        unsupported = self.directory / "unsupported.pdf"
+        duplicate = self.directory / "duplicate.txt"
+        preview = {
+            "counts": {
+                "total": 2,
+                "to_process": 0,
+                "encoding_pending": 0,
+                "duplicates": 1,
+                "role_conflicts": 0,
+                "unknown_role": 0,
+                "skipped": 1,
+            },
+            "items": [
+                {
+                    "path": unsupported,
+                    "name": unsupported.name,
+                    "role": None,
+                    "document_id": None,
+                    "will_process": False,
+                    "reason_code": "UNSUPPORTED_FORMAT",
+                    "message": "不支持的文件格式",
+                },
+                {
+                    "path": duplicate,
+                    "name": duplicate.name,
+                    "role": "senior-fullstack-engineer",
+                    "document_id": "existing-document",
+                    "will_process": False,
+                    "reason_code": "DUPLICATE",
+                    "message": "本次导入中重复",
+                },
+            ],
+        }
+        jobs = []
+        with (
+            patch.object(self.app.store, "preview_import", return_value=preview),
+            patch("tkinter.messagebox.askokcancel", return_value=True),
+            patch.object(self.app, "start_job", side_effect=jobs.append),
+        ):
+            self.app.prepare_files([unsupported, duplicate])
+
+        self.assertEqual(len(jobs), 1)
+        batch_id = self.app.active_import_batch
+        self.app.stop.set()
+        jobs[0]()
+        items = self.app.store.get_import_batch(batch_id)["items"]
+
+        self.assertEqual(
+            [item["reason_code"] for item in items],
+            ["UNSUPPORTED_FORMAT", "DUPLICATE"],
+        )
+        self.assertEqual([item["status"] for item in items], ["跳过", "重复"])
+
+    def test_open_import_report_prefers_last_report_pointer(self):
+        report_dir = self.app.store.root / "import-reports"
+        report_dir.mkdir(parents=True)
+        (report_dir / "import-aaa.txt").write_text("old", encoding="utf-8")
+        (report_dir / "import-zzz.txt").write_text("also old", encoding="utf-8")
+        latest = self.app.store.root / "last-import-report.txt"
+        latest.write_text("latest", encoding="utf-8")
+
+        with patch("resume_screening.desktop.open_path") as open_file:
+            self.app.open_import_report()
+
+        open_file.assert_called_once_with(latest)
+
+    def test_audit_export_uses_selected_document_scope(self):
+        source = self.directory / "synthetic.txt"
+        source.write_text(TEXT, encoding="utf-8")
+        row = self.app.store.prepare(source, "senior-fullstack-engineer")
+        destination = self.directory / "exports"
+        self.app.selected_documents.add(row["id"])
+        jobs = []
+        with (
+            patch("tkinter.filedialog.askdirectory", return_value=str(destination)),
+            patch.object(self.app, "start_job", side_effect=jobs.append),
+            patch.object(
+                self.app.store, "export_audit", return_value=destination / "audit"
+            ) as export,
+        ):
+            self.app.export_audit()
+            jobs[0]()
+            export.assert_called_once_with(destination, [row["id"]])
+
     def test_analyze_selected_batch_and_reports_each_run(self):
         first = self.directory / "first.txt"
         second = self.directory / "second.txt"
@@ -114,7 +254,9 @@ class DesktopUITests(unittest.TestCase):
             patch("resume_screening.desktop.configured_client", return_value=client),
             patch(
                 "resume_screening.desktop.run_analysis",
-                side_effect=lambda *args, **kwargs: (next(statuses), Path("fixture")),
+                side_effect=lambda *args, **kwargs: AnalysisResult(
+                    next(statuses), Path("fixture")
+                ),
             ) as run,
             patch.object(self.app, "start_job") as job,
         ):

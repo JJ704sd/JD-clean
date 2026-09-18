@@ -9,7 +9,12 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXECUTABLE = ROOT / "release/ResumeDesk-0.2.0-preview-windows-x64-onefile.exe"
+import sys
+
+sys.path.insert(0, str(ROOT))
+from resume_screening.versions import APP_VERSION  # noqa: E402
+
+EXECUTABLE = ROOT / f"release/ResumeDesk-{APP_VERSION}-windows-x64-onefile.exe"
 
 
 def main():

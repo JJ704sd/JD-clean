@@ -1,16 +1,16 @@
 ---
 name: screen-senior-fullstack-resumes
-description: "按本科及以上、语言接受度和非外包要求筛选全栈工程师简历；3–7 年经验按 20% 高权重评分但不一票否决，独立/核心项目优先，AI 与物流经验加分。用于单份或批量简历初筛；不用于实习生、面试终评或自动招聘决定。"
+description: "按第一学历本科及以上、语言接受度和非外包要求筛选全栈工程师简历；3–7 年经验按 20% 高权重评分但不一票否决，独立/核心项目优先，AI 与物流经验加分。用于单份或批量简历初筛；不用于实习生、面试终评或自动招聘决定。"
 ---
 
 # 全栈工程师简历初筛
 
-所有输出均为模型建议，必须经过人工审核。当前写入规则为 `senior-fullstack-2026-09-11-v13`。
+所有输出均为模型建议，必须经过人工审核。当前写入规则为 `senior-fullstack-2026-09-14-v14`。v13 及更早版本只读保留，不原地改写。
 
 ## 运行前
 
 1. 读取[岗位画像](references/jd-profile.md)、[筛选 Rubric](references/rubric.md)、[人工审核政策](references/human-review-policy.md)和[结论卡格式](references/conclusion-format.md)。
-2. 仅在用户要求 JSON、批量导出、审计记录或保存结构化文件时读取[输出契约](references/output-contract.md)。边界案例再读取[校准案例](references/decision-examples.md)和[v13 校准记录](references/calibration-notes-v13.md)。
+2. 仅在用户要求 JSON、批量导出、审计记录或保存结构化文件时读取[输出契约](references/output-contract.md)。边界案例再读取[校准案例](references/decision-examples.md)和[v14 校准记录](references/calibration-notes-v14.md)。
 3. 输入须包含可读取的简历和明确岗位。未提供候选人 ID 时生成稳定的批次内 ID；姓名只用于展示，不参与判断。
 4. 默认使用项目本地解析器。扫描件、双栏或复杂排版导致本地文本不完整时，可在用户明确允许外部处理后使用 MinerU `flash-extract`；它是文本预处理器，不参与评分或结论生成。
 
@@ -26,7 +26,7 @@ description: "按本科及以上、语言接受度和非外包要求筛选全栈
 
 硬门槛：
 
-1. 本科及以上。学校品牌不参与判断；缺少足够学历证据时不满足，事实冲突或解析不清进入二审。
+1. 第一学历必须为本科及以上。按可定位的教育经历原文及时间顺序识别中等职业教育及以上最早已完成或已取得的学历；在读、肄业、未取得毕业资格不算已取得学历。大专、中专等首段学历明确且证据置信度高时，标记 `do_not_advance_pending_human`。后续取得本科或更高学历不覆盖较低的第一学历。只提供最高学历、只有在读本科而无首个已取得学历记录、教育顺序或首学历无法确定、事实冲突或证据置信度不足时，进入 `second_review`。不得用学校品牌或“全日制/非全日制”标签代替学历层次或顺序判断。
 2. 明确对语言选择、换语言或转技术栈犹豫、拒绝、抵触时不推进。未写语言态度不等于抵触。
 3. 明确属于人力外包、软件外包、外派驻场或驻场开发经历时不推进。甲方管理外包供应商或向客户交付软件不等于候选人是外包人员。
 
@@ -43,16 +43,16 @@ description: "按本科及以上、语言接受度和非外包要求筛选全栈
 ## 执行
 
 1. 检查页面、文本和 OCR 完整性；不可靠时记录 `U01_PARSE_QUALITY`。不得仅因安装了 MinerU 就上传简历；明确获准后，运行[简历预处理脚本](scripts/prepare_resume.py)并同时传入 `--parser mineru-flash --allow-external-processing`，再把生成的脱敏 Markdown 交给筛选流程。MinerU flash 模式限 10 MB、20 页，失败时停止并报告，不能伪装成本地解析成功。
-2. 按 Rubric 的 9 个 criterion 各生成一条证据，保留最短原文、位置、置信度和五项事实清单；Python 生成 `E0`–`E3`。
-3. Python 生成学历硬门槛和经验匹配信号，再检查明确语言抵触和外包排除信号；学历不满足或任一排除信号成立时生成 `do_not_advance_pending_human`。
-4. 学历为 `unclear` 时进入 `second_review`。年限、物流、独立/核心项目和 AI 信号只影响评分、排序、摘要和追问，不得另设隐形淘汰门槛。
+2. 按 Rubric 的 9 个 criterion 各生成一条证据，保留最短原文、位置、置信度和事实清单；`SEN-ADM-01` 还必须按[输出契约](references/output-contract.md)输出 `first_education` 结构。Python 生成 `E0`–`E3`。
+3. Python 根据 `SEN-ADM-01.first_education` 生成第一学历硬门槛和经验匹配信号，再检查明确语言抵触和外包排除信号；第一学历明确低于本科且证据高置信，或任一排除信号成立时，生成 `do_not_advance_pending_human`。
+4. 只有最高学历、第一学历/教育顺序不清、事实冲突或第一学历证据置信度不足时进入 `second_review`。年限、物流、独立/核心项目和 AI 信号只影响评分、排序、摘要和追问，不得另设隐形淘汰门槛。
 5. 输出最多 3 条最强匹配、3 条关键缺口、一个人工下一步和最多 5 个结构化追问。默认先展示招聘者结论卡。
-6. 用户要求结构化记录时，输出 `schema_version: 1.2`、`jd_version: senior-fullstack-2026-08-14-v1`、`rubric_version: senior-fullstack-2026-09-11-v13`。评分只表示证据覆盖，不替代硬门槛与人审。
+6. 用户要求结构化记录时，输出 `schema_version: 1.2`、`jd_version: senior-fullstack-2026-08-14-v1`、`rubric_version: senior-fullstack-2026-09-14-v14`。评分只表示证据覆盖，不替代硬门槛与人审。
 
 ## 批量输入
 
 - 使用同一版本独立筛选每份简历，再汇总硬门槛、排除信号和加分项。
 - 不因 HC 数自动淘汰候选人，不按学校、公司品牌或无关批次背景排名。
-- v12 及更早结果保持只读；按最新规则复筛时创建新版本任务，不原地改写历史语义。
+- v13 及更早结果保持只读；按最新规则复筛时创建新版本任务，不原地改写历史语义。
 
 保存 JSON 后运行 `python scripts/validate_screening_output.py <record.json>`，再运行 `python scripts/render_conclusion.py <record.json>`。校验失败时修正记录，不绕过门禁。

@@ -13,6 +13,29 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from resume_screening.versions import (  # noqa: E402
+    AI_OUTPUT_CONTRACT_VERSION,
+    APP_VERSION,
+)
+
+
+def _git_commit() -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def _lock_hash() -> str:
+    return hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest()
 
 
 def main():
@@ -50,6 +73,8 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     release = ROOT / "release"
     release.mkdir(exist_ok=True)
+    label = "windows-x64" if sys.platform == "win32" else "macos-" + platform.machine()
+    packaging = "onefile" if args.onefile else "onedir"
     notices = build / "THIRD-PARTY-NOTICES"
     notices.mkdir(exist_ok=True)
     versions = {}
@@ -71,18 +96,34 @@ def main():
             "\n\n".join(lines), encoding="utf-8"
         )
     manifest = {
+        "version": APP_VERSION,
+        "git_commit": _git_commit(),
+        "lock_hash": _lock_hash(),
         "platform": sys.platform,
         "architecture": platform.machine(),
+        "minimum_os": "Windows 11" if sys.platform == "win32" else "macOS 14",
         "python": platform.python_version(),
+        "pyinstaller": importlib.metadata.version("pyinstaller"),
         "dependencies": versions,
         "signed": False,
-        "packaging": "onefile" if args.onefile else "onedir",
-        "models": {
+        "signature_status": "unsigned-preview",
+        "packaging": packaging,
+        "output_contract_version": AI_OUTPUT_CONTRACT_VERSION,
+        "ocr_models": {
             p.name: hashlib.sha256(p.read_bytes()).hexdigest()
             for p in models.glob("*.onnx")
         },
+        "artifact_sha256": None,
+        "smoke_evidence": (
+            "build/desktop/packaged-smoke.json"
+            if not args.skip_smoke
+            else "not-run (--skip-smoke)"
+        ),
     }
-    (build / "build-manifest.json").write_text(
+    build_manifest = build / f"build-manifest-{APP_VERSION}-{label}-{packaging}.json"
+    if build_manifest.exists():
+        raise SystemExit(f"Refusing to overwrite existing manifest: {build_manifest}")
+    build_manifest.write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
     command = [
@@ -107,7 +148,7 @@ def main():
         "--add-data",
         f"{notices}:THIRD-PARTY-NOTICES",
         "--add-data",
-        f"{build / 'build-manifest.json'}:.",
+        f"{build_manifest}:.",
         "--add-data",
         f"{ROOT / 'docs/desktop-user-guide.md'}:.",
         "--collect-all",
@@ -160,22 +201,31 @@ def main():
         ):
             raise SystemExit(f"Packaged smoke test failed. Inspect {report}")
     if args.onefile:
-        output = release / "ResumeDesk-0.2.0-preview-windows-x64-onefile.exe"
+        output = release / f"ResumeDesk-{APP_VERSION}-windows-x64-onefile.exe"
+        if output.exists():
+            raise SystemExit(f"Refusing to overwrite existing artifact: {output}")
         shutil.copy2(executable, output)
         checksum = hashlib.sha256(output.read_bytes()).hexdigest()
         output.with_suffix(".sha256").write_text(
             f"{checksum}  {output.name}\n", encoding="utf-8"
+        )
+        manifest["artifact_sha256"] = checksum
+        manifest["artifact"] = output.name
+        output.with_suffix(".manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
         )
         print(
             f"Built {output}; unsigned preview; smoke {'NOT RUN' if args.skip_smoke else 'passed'}"
         )
         return
 
-    label = "windows-x64" if sys.platform == "win32" else "macos-" + platform.machine()
-    archive_name = release / ("ResumeDesk-0.2.0-preview-" + label)
+    archive_name = release / (f"ResumeDesk-{APP_VERSION}-" + label)
+    archive = Path(str(archive_name) + ".zip")
+    if archive.exists():
+        raise SystemExit(f"Refusing to overwrite existing artifact: {archive}")
     if sys.platform == "darwin":
         # ditto preserves .app symlinks and metadata; generic ZIP writers do not.
-        archive = Path(str(archive_name) + ".zip")
         subprocess.run(
             [
                 "ditto",
@@ -197,6 +247,11 @@ def main():
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_suffix(".sha256").write_text(
         f"{checksum}  {archive.name}\n", encoding="utf-8"
+    )
+    manifest["artifact_sha256"] = checksum
+    manifest["artifact"] = archive.name
+    archive.with_suffix(".manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     print(
         f"Built {archive}; unsigned preview; smoke {'NOT RUN' if args.skip_smoke else 'passed'}"

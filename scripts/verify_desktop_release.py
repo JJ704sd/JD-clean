@@ -8,10 +8,14 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+
+sys.path.insert(0, str(ROOT))
+from resume_screening.versions import APP_VERSION  # noqa: E402
 
 
 def main():
-    archive_path = ROOT / "release/ResumeDesk-0.2.0-preview-windows-x64.zip"
+    archive_path = ROOT / f"release/ResumeDesk-{APP_VERSION}-windows-x64.zip"
     report_dir = ROOT / "build/desktop"
     with tempfile.TemporaryDirectory(
         prefix="isolated-release-", dir=ROOT / "build"

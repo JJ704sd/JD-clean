@@ -24,6 +24,24 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("不能单独生成暂不推进或二审", prompt)
         self.assertIn("高级全栈 v13 校准记录", prompt)
 
+    def test_senior_v14_prompt_extracts_first_education_as_separate_evidence(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-14-v14",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn("全栈工程师 v14 校准记录", prompt)
+        self.assertIn("SEN-ADM-01 还必须包含 first_education 对象", prompt)
+        self.assertIn("below_bachelor", prompt)
+        self.assertIn("不得从最高学历推断第一学历", prompt)
+        self.assertIn("明确大专后升本仍为 below_bachelor", prompt)
+        self.assertIn("在读、肄业、未取得毕业资格不算已取得学历", prompt)
+        self.assertIn("不要输出解释性前后缀", prompt)
+
     def test_senior_v12_prompt_contains_latest_hard_gates_and_bonus_signals(self):
         prompt = build_system_prompt(
             ROOT,

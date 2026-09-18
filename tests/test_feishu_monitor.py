@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -23,6 +25,8 @@ from resume_screening.feishu_monitor import (
     MonitorConfig,
     PreflightContext,
     base_row_duplicate,
+    argument_parser,
+    build_config,
     build_writeback_updates,
     compare_writeback,
     markdown_quality_issues,
@@ -41,6 +45,32 @@ from resume_screening.queue import TaskStore
 
 
 class FeishuMonitorTests(unittest.TestCase):
+    def test_screening_requires_batch_database_and_output(self):
+        args = argument_parser().parse_args(
+            [
+                "--screening",
+                "--base-token",
+                "test-base-token",
+                "--pdf-dir",
+                str(Path.cwd()),
+            ]
+        )
+
+        with patch.dict(
+            os.environ, {"USERPROFILE": str(Path.cwd())}, clear=True
+        ):
+            with self.assertRaisesRegex(ValueError, "screening-database"):
+                build_config(args)
+
+            args.screening_database = "screening.sqlite3"
+            with self.assertRaisesRegex(ValueError, "screening-output"):
+                build_config(args)
+
+        with self.assertRaisesRegex(ValueError, "batch database and output"):
+            FeishuResumeMonitor(
+                replace(self._config(), screening_enabled=True)
+            )
+
     def _config(self) -> MonitorConfig:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -992,6 +1022,138 @@ class FeishuMonitorTests(unittest.TestCase):
         self.assertEqual(updates[DEFAULT_STATUS_COLUMN], ["success"])
         self.assertTrue(compare_writeback(config, list(updates.values()), updates))
 
+    def test_link_only_preflight_allows_missing_audit_columns(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            root = Path(tmp)
+            pdf_directory = root / "pdfs"
+            pdf_directory.mkdir()
+            source = pdf_directory / "【全栈工程师_深圳 15-25K】张三 4年.pdf"
+            source.write_bytes(b"pdf source")
+
+            class LinkOnlyPreflightCLI:
+                def run(self, args, *, timeout=90):
+                    command = args[1]
+                    if command in {"+table-get", "+view-get"}:
+                        return CliResponse(0, {"ok": True, "data": {}})
+                    if command == "+field-list":
+                        return CliResponse(
+                            0,
+                            {
+                                "ok": True,
+                                "data": {
+                                    "fields": [
+                                        {"id": "name", "name": "姓名", "type": "text"},
+                                        {"id": "link", "name": "在线链接", "type": "text"},
+                                    ]
+                                },
+                            },
+                        )
+                    if command == "+record-list":
+                        output = Path.cwd() / args[args.index("--output") + 1]
+                        output.parent.mkdir(parents=True, exist_ok=True)
+                        output.write_text(
+                            json.dumps(
+                                {"record_id": "rec-1", "姓名": "张三", "在线链接": None},
+                                ensure_ascii=False,
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                        return CliResponse(0, {}, stdout="")
+                    raise AssertionError(f"unexpected CLI call: {command}")
+
+            config = MonitorConfig(
+                base_token="test-base-token",
+                table_id="tbl-test",
+                view_id="vew-test",
+                pdf_directory=pdf_directory,
+                output_directory=root / "outputs",
+                state_path=root / "state.json",
+                report_path=root / "report.json",
+                history_path=root / "history.ndjson",
+                records_path=root / "records.ndjson",
+                lock_path=root / "lock",
+                link_column="在线链接",
+                link_only_writeback=True,
+            )
+            preflight = FeishuResumeMonitor(config, LinkOnlyPreflightCLI()).preflight()
+
+            self.assertTrue(preflight.ok)
+            self.assertTrue(preflight.report["writeback_allowed"])
+            self.assertEqual(preflight.report["operation_mode"], "link_only_writeback")
+            self.assertIn(DEFAULT_STATUS_COLUMN, preflight.report["missing_columns"])
+
+    def test_link_only_writeback_only_updates_and_verifies_link(self):
+        config = self._config()
+        config = MonitorConfig(
+            **{
+                **config.__dict__,
+                "link_column": "在线链接",
+                "link_only_writeback": True,
+            }
+        )
+        fields = {
+            "在线链接": {"id": "link", "name": "在线链接", "type": "text"},
+        }
+        preflight = PreflightContext(
+            True,
+            {"writeback_allowed": True},
+            [],
+            {},
+            fields,
+            "fingerprint",
+        )
+
+        class LinkOnlyWritebackCLI:
+            def __init__(self):
+                self.update_payload = None
+                self.get_field_ids = []
+
+            def run(self, args, *, timeout=90):
+                command = args[1]
+                if command == "+record-batch-update":
+                    self.update_payload = json.loads(args[args.index("--json") + 1])
+                    return CliResponse(0, {"ok": True, "data": {}})
+                if command == "+record-get":
+                    self.get_field_ids = [
+                        args[index + 1]
+                        for index, value in enumerate(args[:-1])
+                        if value == "--field-id"
+                    ]
+                    return CliResponse(
+                        0,
+                        {
+                            "ok": True,
+                            "data": {
+                                "data": [
+                                    [
+                                        "[https://example.feishu.cn/docx/test](https://example.feishu.cn/docx/test)"
+                                    ]
+                                ]
+                            },
+                        },
+                    )
+                raise AssertionError(f"unexpected CLI call: {command}")
+
+        cli = LinkOnlyWritebackCLI()
+        result = FeishuResumeMonitor(config, cli).writeback(
+            preflight,
+            {"record_id": "rec-1", "source_sha256": "a" * 64},
+            "https://example.feishu.cn/docx/test",
+        )
+
+        self.assertEqual(result["status"], "verified")
+        self.assertTrue(result["written"])
+        self.assertEqual(
+            cli.update_payload,
+            {
+                "update_records": {
+                    "rec-1": {"在线链接": "https://example.feishu.cn/docx/test"}
+                }
+            },
+        )
+        self.assertEqual(cli.get_field_ids, ["link"])
+
     def test_writeback_is_blocked_when_success_option_is_not_available(self):
         config = self._config()
         fields = {
@@ -1042,7 +1204,9 @@ class FeishuMonitorTests(unittest.TestCase):
             "## 其他信息",
         )))
         self.assertNotIn("13812345678", document)
-        self.assertNotIn("张三", document)
+        self.assertIn("张三", document)
+        self.assertIn("姓名: 张三", document)
+        self.assertNotIn("[候选人]", document)
         self.assertNotIn("candidate_id:", document)
         self.assertNotIn("source_sha256:", document)
         self.assertIn(
@@ -1050,6 +1214,43 @@ class FeishuMonitorTests(unittest.TestCase):
             document,
         )
         self.assertEqual(markdown_quality_issues(document), [])
+
+    def test_structured_markdown_moves_basic_education_into_education_section(self):
+        cleaned = SimpleNamespace(
+            candidate_id="feishu-test",
+            source_sha256="a" * 64,
+            parser_version="test",
+            used_ocr=False,
+            page_count=1,
+            markdown="---\n\n所学专业: 软件工程 学历: 本科\n工作经历\n负责 Linux 运维。\n",
+        )
+
+        document = structured_markdown(cleaned, "候选人乙")
+
+        education = document.split("## 教育经历\n\n", 1)[1].split("\n\n## 工作经历", 1)[0]
+        self.assertIn("所学专业: 软件工程 学历: 本科", education)
+        self.assertIn("姓名: 候选人乙", document)
+
+    def test_markdown_quality_accepts_feishu_heading_levels_and_reports_missing_section(self):
+        content = "\n".join(
+            f"# {heading}"
+            for heading in (
+                "基本信息",
+                "个人简介",
+                "教育经历",
+                "工作经历",
+                "项目经历",
+                "技能",
+                "证书与语言能力",
+                "其他信息",
+            )
+            if heading != "技能"
+        )
+
+        self.assertEqual(
+            markdown_quality_issues(content),
+            ["missing headings: ## 技能"],
+        )
 
     def test_structured_markdown_preserves_searchable_literals_and_adds_block_spacing(self):
         cleaned = SimpleNamespace(

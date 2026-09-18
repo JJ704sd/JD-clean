@@ -1,0 +1,7 @@
+interface:
+  display_name: "运维开发工程师简历初筛"
+  short_description: "按证据审查运维、DevOps、稳定性与 AI 运维经历"
+  default_prompt: "使用 $screen-operations-devops-resumes 按岗位画像和 Rubric 审查这些运维开发工程师简历，保留证据位置、非最终建议和必要的人工作业。"
+
+policy:
+  allow_implicit_invocation: true

@@ -13,6 +13,7 @@
 - AI 产品经理：`ai-product-manager`
 - 资深全栈工程师：`senior-fullstack-engineer`
 - 全栈开发实习生：`fullstack-development-intern`
+- 运维开发工程师：`operations-devops-engineer`
 
 ## 适用边界与当前校准状态
 
@@ -26,7 +27,7 @@
 - 模型输出无效、解析失败和岗位错配属于流程质量问题，应与候选人的能力判断分开统计。
 - 决策相关疑点只有在澄清后可能改变建议时才进入二审；不会改变当前方向的缺失项会由 Python 过滤。
 
-全栈工程师 v13 将本科及以上作为简历硬门槛；明确对语言选择或转语言犹豫/抵触，以及明确人力外包、软件外包、外派驻场或驻场开发经历，均建议暂不推进并等待人工一审。3–7 年应用研发经验的评分权重由 10% 提高到 20%，范围外或年限不清会降低总分，但不能单独淘汰。独立承担项目或项目核心开发者优先，AI 深度使用和 AI 产品/工程经验加分；物流经验对优先级影响较大，但不是强制条件。
+全栈工程师 v14 将“第一学历本科及以上”作为简历硬门槛；只有简历原文和时间顺序能明确证明第一学历低于本科时，才建议暂不推进并等待人工一审。只写最高学历、第一学历顺序不清、事实冲突或低置信度时进入二审。明确对语言选择或转语言犹豫/抵触，以及明确人力外包、软件外包、外派驻场或驻场开发经历，也建议暂不推进并等待人工一审。3–7 年应用研发经验的评分权重为 20%，范围外或年限不清会降低总分，但不能单独淘汰。独立承担项目或项目核心开发者优先，AI 深度使用和 AI 产品/工程经验加分；物流经验对优先级影响较大，但不是强制条件。所有机器建议均须人工确认，不自动删除简历或写入 ATS 最终状态。
 
 ## 安装
 
@@ -50,10 +51,21 @@ $env:MINIMAX_API_ENDPOINT = "https://api.minimax.io/v1/text/chatcompletion_v2"
 
 ## 使用
 
+每次登记、处理和导出都使用同一组批次路径。每个新日期、岗位或重跑批次都更换 `$BatchTag`，不要复用历史数据库或输出目录：
+
+```powershell
+$BatchTag = "$(Get-Date -Format 'yyyy-MM-dd')-senior-v14-run01"
+$Db = "var\screening-$BatchTag.sqlite3"
+$Out = "outputs\screening-$BatchTag"
+$Export = "exports\screening-$BatchTag"
+$CalibrationReport = Join-Path $Export "calibration-report.json"
+$InputDirectory = Join-Path $env:USERPROFILE 'Downloads'
+```
+
 登记一个目录中的简历，必须显式选择固定岗位或自动分流：
 
 ```powershell
-uv run --locked python -m resume_screening enqueue C:\Users\Administrator\Downloads `
+uv run --locked python -m resume_screening --database $Db enqueue $InputDirectory `
   --role senior-fullstack-engineer
 ```
 
@@ -63,18 +75,18 @@ uv run --locked python -m resume_screening enqueue C:\Users\Administrator\Downlo
 
 ```powershell
 uv run --locked python -m resume_screening `
-  --database "var\screening-today.sqlite3" `
-  enqueue "C:\Users\Administrator\Downloads" --auto-route --today
+  --database $Db `
+  enqueue $InputDirectory --auto-route --today
 ```
 
-`--today` 按本机时区筛选“最后修改日期为今天”的文件，避免把下载目录中的历史文件全部登记。建议每个批次始终显式指定数据库；不加 `--database` 会写入新的默认库 `var\screening-v8.sqlite3`，不会触碰旧的 `var\screening.sqlite3`。
+`--today` 按本机时区筛选“最后修改日期为今天”的文件，避免把下载目录中的历史文件全部登记。数据库不再有共享默认值；数据库命令省略 `--database` 会在打开数据库或领取任务前报错。`worker` 还必须传入批次专属 `--output`，`export` 必须传入批次专属 `--directory`。
 
 Boss格式文件名中的候选人姓名或昵称只写入本地审核记录和导出文件；发送给模型前仍会脱敏。无法从可信文件名格式识别姓名时保持为空，不从简历邮箱等信息猜测。
 
 单份登记时可以指定稳定 ID 和仅用于本地展示的姓名：
 
 ```powershell
-uv run --locked python -m resume_screening enqueue C:\Users\Administrator\Downloads\candidate.pdf `
+uv run --locked python -m resume_screening --database $Db enqueue "$InputDirectory\candidate.pdf" `
   --role senior-fullstack-engineer `
   --candidate-id candidate-001 `
   --candidate-name 张三
@@ -83,20 +95,20 @@ uv run --locked python -m resume_screening enqueue C:\Users\Administrator\Downlo
 处理当前队列后退出：
 
 ```powershell
-uv run --locked python -m resume_screening worker --once
+uv run --locked python -m resume_screening --database $Db --output $Out worker --once
 ```
 
 首次接入新提示词或新模型时，可先限制为一份任务做真实小样验证：
 
 ```powershell
-uv run --locked python -m resume_screening worker --once --max-tasks 1
+uv run --locked python -m resume_screening --database $Db --output $Out worker --once --max-tasks 1
 ```
 
 扫描件、双栏或复杂排版简历可显式使用 MinerU 预处理，以改善 OCR 和版面顺序。该模式会把原文件发送到 MinerU 服务端，只有在获得简历外部处理授权后才能启用；默认本地解析流程不上传文档：
 
 ```powershell
 uv run --locked python skills\screen-senior-fullstack-resumes\scripts\prepare_resume.py `
-  "C:\Users\Administrator\Downloads\candidate.pdf" `
+  "$InputDirectory\candidate.pdf" `
   --candidate-id candidate-001 `
   --candidate-name 张三 `
   --parser mineru-flash `
@@ -109,14 +121,14 @@ MinerU `flash-extract` 无需令牌，但单文件不能超过 10 MB 或 20 页�
 长期监听（无目录输入时只消费当前数据库队列）：
 
 ```powershell
-uv run --locked python -m resume_screening worker --watch --poll-seconds 5
+uv run --locked python -m resume_screening --database $Db --output $Out worker --watch --poll-seconds 5
 ```
 
 下载目录混有三个支持岗位时，使用明确文件名前缀自动分流。支持 `.pdf`、`.docx`、`.txt`、`.md`；隐藏文件、`.crdownload`、`.part` 和其他临时文件会忽略。文件大小和最后修改时间连续两个轮询周期不变后才入队，同一文件内容和合同只入队一次：
 
 ```powershell
-uv run --locked python -m resume_screening worker --watch `
-  --input C:\Users\Administrator\Downloads `
+uv run --locked python -m resume_screening --database $Db --output $Out worker --watch `
+  --input $InputDirectory `
   --auto-route `
   --poll-seconds 5
 ```
@@ -126,16 +138,16 @@ uv run --locked python -m resume_screening worker --watch `
 如需只监听一个岗位：
 
 ```powershell
-uv run --locked python -m resume_screening worker --watch `
-  --input C:\Users\Administrator\Downloads `
+uv run --locked python -m resume_screening --database $Db --output $Out worker --watch `
+  --input $InputDirectory `
   --role senior-fullstack-engineer
 ```
 
 固定岗位 watch 默认跳过没有岗位前缀的文件；只有明确确认目录内未标注文件也属于该岗位时才加：
 
 ```powershell
-uv run --locked python -m resume_screening worker --watch `
-  --input C:\Users\Administrator\Downloads `
+uv run --locked python -m resume_screening --database $Db --output $Out worker --watch `
+  --input $InputDirectory `
   --role senior-fullstack-engineer `
   --accept-unlabeled
 ```
@@ -143,22 +155,30 @@ uv run --locked python -m resume_screening worker --watch `
 查看状态、后台健康、显式重置未获得模型完成响应的任务、导出批次结果与人工复核队列：
 
 ```powershell
-uv run --locked python -m resume_screening status
-uv run --locked python -m resume_screening health
-uv run --locked python -m resume_screening retry-failed
-uv run --locked python -m resume_screening export --directory exports
+uv run --locked python -m resume_screening --database $Db status
+uv run --locked python -m resume_screening --database $Db health
+uv run --locked python -m resume_screening --database $Db retry-failed
+uv run --locked python -m resume_screening --database $Db export --directory $Export
 ```
 
 `health` 输出 worker 心跳是否仍持有、最后心跳/成功时间、当前 parser/prompt/scoring/JD/rubric、五类队列计数、24 小时成功/错误数、错误码分布、watch 跳过计数和超阈值 processing 任务。worker 使用 SQLite 租约限制同一数据库只能有一个活跃消费者；进程异常退出后租约过期，health 会报告 `stale`。
 
-默认数据库为 `var/screening-v8.sqlite3`，默认输出目录为 `outputs`。数据库名称沿用历史路径，但新任务使用当前岗位合同版本。可在子命令前使用 `--database` 和 `--output` 修改：
+数据库和结果目录都必须按日期、岗位、批次显式指定。可按上述方式创建新批次路径，再在子命令前传入：
 
 ```powershell
-uv run --locked python -m resume_screening --database D:\screening\state.sqlite3 `
-  --output D:\screening\outputs worker --once
+uv run --locked python -m resume_screening --database $Db `
+  --output $Out worker --once
 ```
 
 ## 飞书简历闭环监控
+
+启用筛选交接时，先为本批次设定唯一的数据库和结果目录，并在 dry-run、apply 与 worker 中保持一致：
+
+```powershell
+$BatchTag = "$(Get-Date -Format 'yyyy-MM-dd')-senior-v14-run01"
+$Db = "var\screening-$BatchTag.sqlite3"
+$Out = "outputs\screening-$BatchTag"
+```
 
 `scripts/feishu_resume_monitor.py` 将下载目录中的 `.pdf` 简历做成可恢复的闭环：每轮先读取 Base 表结构、视图和全量记录，默认只接收当前岗位前缀 `【全栈工程师_深圳 15-25K】` 并按固定 `PDF_KEY_RULE` 做唯一匹配，再执行本地提取/OCR、脱敏和结构化 Markdown；同一飞书文件夹使用独立的跨进程周期锁串行化状态核验、导入决策和实际导入，异步任务会续查，文档 URL 只取 CLI 实际返回值，随后回读并检查正文。监控器本身不调用模型；加上 `--screening` 后，仅在文档回读成功后把任务交给现有 SQLite 筛选队列。
 
@@ -169,7 +189,7 @@ $env:FEISHU_BASE_TOKEN = "通过受控环境注入，不要写入脚本或日志
 $env:FEISHU_PDF_DIR = "$env:USERPROFILE\Downloads"
 $env:DRY_RUN = "true"
 uv run --locked python scripts\feishu_resume_monitor.py --once `
-  --seed-report "D:\JD clean\outputs\feishu-batch-2026-09-02\batch-report.json"
+  --seed-report ".\outputs\feishu-batch-2026-09-02\batch-report.json"
 ```
 
 这里的 `--seed-report` 用于吸收本次已成功导入的 9 份文档；以后新增监控轮次不再重复创建它们。若换了批次或环境，应明确替换为对应的成功批次报告。
@@ -178,43 +198,56 @@ uv run --locked python scripts\feishu_resume_monitor.py --once `
 
 ```powershell
 uv run --locked python scripts\feishu_resume_monitor.py --once --dry-run --screening `
-  --seed-report "D:\JD clean\outputs\feishu-batch-2026-09-02\batch-report.json"
+  --screening-database $Db --screening-output $Out `
+  --seed-report ".\outputs\feishu-batch-2026-09-02\batch-report.json"
 ```
 
 确认报告后，用 apply 将“文档已成功回读”的简历交给现有筛选队列：
 
 ```powershell
-uv run --locked python scripts\feishu_resume_monitor.py --once --apply --screening
+uv run --locked python scripts\feishu_resume_monitor.py --once --apply --screening `
+  --screening-database $Db --screening-output $Out
 ```
 
 再启动已有的模型 worker 消费队列；模型密钥只由 worker 从 `MINIMAX_API_KEY` 读取，监控器不接触该密钥：
 
 ```powershell
 uv run --locked python -m resume_screening `
-  --database "var\screening-v8.sqlite3" `
-  --output "outputs" worker --watch --poll-seconds 5
+  --database $Db `
+  --output $Out worker --watch --poll-seconds 5
 ```
 
-持续运行时，将第二条命令改为 `--watch --apply --screening --interval-seconds 300`，并保持上述 worker 单独运行。当前岗位前缀默认映射到 `senior-fullstack-engineer`；更换岗位时必须显式指定 `--screening-role` 并重新 dry-run。worker 会复用现有岗位 Skill/Rubric、模型证据提取、Python 确定性评分、`screening.json`、`conclusion.md` 和人工复核队列；模型结果仍是 `non_final`，不会自动淘汰或写入最终招聘状态。
+持续运行时，将第二条命令改为 `--watch --apply --screening --interval-seconds 300`，并保持上述 worker 单独运行。启用筛选时必须提供 `--screening-database` 与 `--screening-output`（也可通过对应环境变量显式设置）；省略后监控器会在导入前失败，不会转入共享历史队列。当前岗位前缀默认映射到 `senior-fullstack-engineer`；更换岗位时必须显式指定 `--screening-role` 并重新 dry-run。worker 会复用现有岗位 Skill/Rubric、模型证据提取、Python 确定性评分、`screening.json`、`conclusion.md` 和人工复核队列；模型结果仍是 `non_final`，不会自动淘汰或写入最终招聘状态。
 
 确认报告后再启动实际监控：
 
 ```powershell
 $env:DRY_RUN = "false"
-uv run --locked python scripts\feishu_resume_monitor.py --watch --apply --screening --interval-seconds 300
+uv run --locked python scripts\feishu_resume_monitor.py --watch --apply --screening `
+  --screening-database $Db --screening-output $Out --interval-seconds 300
 ```
 
 本次已完成的批次可以用 `--seed-report` 写入本地幂等状态，避免当前 Base 尚未补字段时重复导入已有文档。状态保存在 `var/feishu-resume-monitor/state.json`，当前轮报告为 `outputs/feishu-resume-monitor/batch-report.json`，历史摘要为 `batch-history.ndjson`。已有文档链接或相同源哈希默认跳过；文档回读和 Base 操作的临时网络错误/限流单次最多重试 3 次，当前 `drive +import` 没有 CLI 幂等键，临时错误且没有 URL/ticket 时会保留为 `import_pending`，不会在下一轮或 `--retry-failed` 中盲目重放，权限、认证和格式错误不自动重试。
 
-只有配置的“简历文档链接、处理状态、错误信息、处理时间、源 PDF 哈希”字段全部存在且类型可写时，成功回读的文档才会触发 `base +record-batch-update`，随后使用 `base +record-get` 核验。字段缺失时仍可完成 Markdown、文档导入和本地 AI 筛选队列交接，但 Base 写回与 NEXT_ACTION 保持关闭；新增字段后需重新运行一次 dry-run。
+标准模式下，只有配置的“简历文档链接、处理状态、错误信息、处理时间、源 PDF 哈希”字段全部存在且类型可写时，成功回读的文档才会触发 `base +record-batch-update`，随后使用 `base +record-get` 核验。若目标 Base 已明确授权只维护现有 URL 字段，可显式使用 `--link-only-writeback --link-column 在线链接`：预检只要求行键和 URL 字段，写回和回读都只触及 `在线链接`，不会创建字段、记录或修改筛选状态。该兼容模式不替代真实的文档导入凭据；没有 `FEISHU_DOC_FOLDER_TOKEN` 时仍不能为本地简历生成新的在线文档 URL。
 
 ## 在线简历发布器与 MiniMax-M3 筛选
+
+筛选模式需要显式批次数据库和结果目录；dry-run、apply、索引刷新和 worker 必须使用相同路径：
+
+```powershell
+$BatchTag = "$(Get-Date -Format 'yyyy-MM-dd')-senior-v14-run01"
+$Db = "var\screening-$BatchTag.sqlite3"
+$Out = "outputs\screening-$BatchTag"
+```
 
 如果不需要读取或写回 Base，只需把本地 PDF 发布为飞书文档并生成本地链接列表，可使用 `scripts/feishu_online_resume_publisher.py`。默认只做本地提取/OCR、清洗脱敏和 dry-run；加 `--screening` 后，`--apply` 只有在飞书文档回读非空时才会把任务交给筛选队列，发布器自身不会调用模型或发送群消息：
 
 ```powershell
-uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening
-uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply --screening
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening `
+  --screening-database $Db --screening-output $Out
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply --screening `
+  --screening-database $Db --screening-output $Out
 ```
 
 发布器生成的 `resume.feishu.md` 是面向面试官的展示稿：不包含候选人哈希、解析器版本、时间戳等 YAML 元数据；`resume.cleaned.md` 仍保留这些审计字段。展示稿会按语义块增加段落留白，并对正文中实际出现的技术栈关键词使用飞书支持的浅黄色背景高亮。发布时同时生成 `resume.feishu.xml`，在线文档会在 Markdown 导入后用该 DocxXML 侧车覆盖一次并回读确认高亮已经持久化。标准 Markdown 和当前飞书导入格式没有可靠的字符间距属性，因此不会向技术词内部插入空格，以免破坏复制、搜索和筛选；间距调整采用安全的段落节奏作为兼容方案。
@@ -222,10 +255,11 @@ uv run --locked python scripts\feishu_online_resume_publisher.py --once --apply 
 启用 `--screening` 时，发布器不会在“仅完成飞书回读”后展示链接；`resume-index.md` 初始只保留标题。worker 完成任务后，用与发布时相同的筛选参数再执行一次本地 dry-run 刷新索引：
 
 ```powershell
-uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening
+uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-run --screening `
+  --screening-database $Db --screening-output $Out
 ```
 
-索引默认只展示当前岗位合同下 `score >= 70` 且 Python 生成的 `review_status=advance_pending_human` 的候选人；二审、人工复核或低于展示阈值者不会进入列表。v13 只将本科及以上作为学历硬门槛，同时排除明确语言抵触或外包经历；3–7 年经验按 20% 权重影响总分，不单独决定推进状态。
+索引默认只展示当前岗位合同下 `score >= 70` 且 Python 生成的 `review_status=advance_pending_human` 的候选人；二审、人工复核或低于展示阈值者不会进入列表。v14 以第一学历本科及以上作为硬门槛；后续学历提升不能覆盖低于本科的首段学历，只有最高学历或首学历不清时进入二审。明确语言抵触或外包经历仍是排除信号；3–7 年经验按 20% 权重影响总分，不单独决定推进状态。
 
 如需查看所有已完成且分数有效的结果（包括低于阈值或 `do_not_advance_pending_human`，仅用于人工复核，不代表推进或录用），使用 `--screening-index-mode all-scored`；也可设置环境变量 `FEISHU_SCREENING_INDEX_MODE=all-scored`。未完成和 `manual_review` 任务不会进入该列表。
 
@@ -243,8 +277,8 @@ uv run --locked python scripts\feishu_online_resume_publisher.py --once --dry-ru
 
 ```powershell
 uv run --locked python -m resume_screening `
-  --database "var\screening-v8.sqlite3" `
-  --output "outputs" worker --watch --poll-seconds 5
+  --database $Db `
+  --output $Out worker --watch --poll-seconds 5
 ```
 
 ## 输出
@@ -260,7 +294,7 @@ outputs/<candidate_id>/
 
 `screening.json` 使用双层结构：`screening_record` 是已通过岗位 validator 的证据与流程记录，`scorecard` 是应用层生成的确定性分数、证据档位、独立 `review_status`、各维度得分和评分版本。
 
-当前证据提取流程中，AI 产品经理继续返回逐项证据、决策相关疑点和面试追问；全栈工程师返回逐项事实清单，不自报证据等级。Python 负责规范证据等级、v13 学历硬门槛、经验高权重评分与排除信号、建议、摘要、人工审核状态和档位。旧版已完成结果保持只读；尚未处理的旧解析/提示/评分/rubric 任务不会调用模型，并汇总为 `STALE_CONTRACT_VERSION`，需从原始文件重新登记为新版本任务。
+当前证据提取流程中，AI 产品经理继续返回逐项证据、决策相关疑点和面试追问；全栈工程师返回逐项事实清单，不自报证据等级。Python 负责规范证据等级、v14 第一学历硬门槛、经验高权重评分与排除信号、建议、摘要、人工审核状态和档位。旧版已完成结果保持只读；尚未处理的旧解析/提示/评分/rubric 任务不会调用模型，并汇总为 `STALE_CONTRACT_VERSION`，需从原始文件重新登记为新版本任务。
 
 ## 调用与失败语义
 
@@ -281,7 +315,7 @@ outputs/<candidate_id>/
 
 ## 评分
 
-证据强度固定换算为 `E0=0%`、`E1=40%`、`E2=75%`、`E3=100%`。全栈工程师 v13 中，经验维度占 20%；Python 生成学历硬门槛、经验匹配、语言/外包排除信号，以及项目责任、AI 和物流优先信号。
+证据强度固定换算为 `E0=0%`、`E1=40%`、`E2=75%`、`E3=100%`。全栈工程师 v14 中，经验维度占 20%；Python 根据第一学历证据生成硬门槛状态，并处理经验匹配、语言/外包排除信号，以及项目责任、AI 和物流优先信号。
 
 - A：证据匹配分 85–100。
 - B：证据匹配分 70–84。
@@ -289,7 +323,7 @@ outputs/<candidate_id>/
 - D：证据匹配分 40–54。
 - E：证据匹配分 0–39。
 
-证据档位不覆盖岗位规则：本科及以上映射为 `met`、`not_met` 或 `unclear`；学历不满足建议暂不推进，学历不清进入二审。3–7 年单独记录为高权重经验匹配信号。明确语言抵触或外包经历仍是排除信号。旧版 v2–v12 记录继续只读兼容，新任务使用 v13 重筛并保留版本信息。
+证据档位不覆盖岗位规则：第一学历本科及以上映射为 `met`、`not_met` 或 `unclear`；高置信原文证明首段学历低于本科时建议暂不推进，第一学历或教育顺序不清时进入二审。3–7 年单独记录为高权重经验匹配信号。明确语言抵触或外包经历仍是排除信号。旧版 v2–v13 记录继续只读兼容，新全栈任务使用 v14 并保留版本信息。
 
 ## 人工原因与校准
 
@@ -302,8 +336,8 @@ task_id,human_conclusion,reason_category,criterion_id,model_recommendation
 ```
 
 ```powershell
-uv run --locked python -m resume_screening calibrate import .\human-results.csv
-uv run --locked python -m resume_screening calibrate report --output .\exports\calibration-report.json
+uv run --locked python -m resume_screening --database $Db calibrate import .\human-results.csv
+uv run --locked python -m resume_screening --database $Db calibrate report --output $CalibrationReport
 ```
 
 只有 `capability` 和 `hard_eligibility` 进入能力校准统计；薪资、地点、到岗、岗位意向和未知原因只计入非能力原因。报告包含分状态分数分布、Go 门槛命中率、建议与人工能力结论混淆矩阵和主要分歧 criterion。样本不足时会明确警告，不产生伪精确调权建议，也不会自动修改权重。
@@ -316,4 +350,4 @@ uv run --locked python -m unittest discover -s skills/screen-ai-product-manager-
 uv run --locked python -m resume_screening --help
 ```
 
-Windows 后台运行可以参考 [计划任务命令模板](docs/windows-task-template.ps1)。模板只打印待确认的参数和命令，不会注册计划任务、不设置系统级凭据，也不会在本次变更中启动长期进程。实际配置时将“起始于”设置为项目目录，并使用独立的 `var\screening-v8.sqlite3`；同一数据库只运行一个 worker。SQLite 会保留已发现任务；请求期间中断的任务进入人工处理，避免重复调用。
+Windows 持续监听可以参考 [计划任务命令模板](docs/windows-task-template.ps1)；该模板用于固定批次的 `worker --watch`，只打印命令，不会注册计划任务。每日定时筛选使用 `scripts/run_daily_senior_fullstack_screening.ps1`：每次按本机日期使用独立数据库和输出目录，只登记当日 PDF 中带当前全栈岗位前缀的文件，再运行 `worker --once`。实际调用前必须显式传入 `-AllowExternalModelData`；脚本优先沿用当前进程配置，只在缺项时从项目 `.env` 逐行读取白名单 MiniMax 配置，不执行或回显文件内容，并在无密钥时于登记前退出。配置任务时将“起始于”设为项目目录，并使用同一任务实例策略避免重叠运行。SQLite 会保留已发现任务；请求期间中断的任务进入人工处理，避免重复调用。

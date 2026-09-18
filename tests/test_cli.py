@@ -16,6 +16,61 @@ from resume_screening.queue import TaskStore
 
 
 class CliTests(unittest.TestCase):
+    def test_database_commands_require_an_explicit_batch_database(self):
+        for command in (["health"], ["worker", "--once"]):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                previous_cwd = Path.cwd()
+                stderr = io.StringIO()
+                try:
+                    os.chdir(root)
+                    with (
+                        patch.dict(os.environ, {}, clear=True),
+                        redirect_stderr(stderr),
+                    ):
+                        code = main(command)
+                finally:
+                    os.chdir(previous_cwd)
+
+                self.assertEqual(code, 2)
+                self.assertIn("--database", stderr.getvalue())
+                self.assertFalse((root / "var" / "screening-v8.sqlite3").exists())
+
+    def test_worker_requires_an_explicit_batch_output_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stderr = io.StringIO()
+            with (
+                patch.dict(os.environ, {"MINIMAX_API_KEY": "test-key"}, clear=True),
+                redirect_stderr(stderr),
+            ):
+                code = main(
+                    ["--database", str(root / "state.sqlite3"), "worker", "--once"]
+                )
+
+            self.assertEqual(code, 2)
+            self.assertIn("--output", stderr.getvalue())
+            self.assertFalse((root / "state.sqlite3").exists())
+
+    def test_export_requires_an_explicit_batch_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            previous_cwd = Path.cwd()
+            stderr = io.StringIO()
+            try:
+                os.chdir(root)
+                with redirect_stderr(stderr):
+                    code = main(
+                        ["--database", str(root / "state.sqlite3"), "export"]
+                    )
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(code, 2)
+            self.assertIn("--directory", stderr.getvalue())
+            self.assertFalse((root / "state.sqlite3").exists())
+            self.assertFalse((root / "exports").exists())
+
     def test_export_review_queue_includes_task_id_for_calibration_import(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -250,7 +305,16 @@ class CliTests(unittest.TestCase):
                 )
             stderr = io.StringIO()
             with patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
-                code = main(["--database", str(database), "worker", "--once"])
+                code = main(
+                    [
+                        "--database",
+                        str(database),
+                        "--output",
+                        str(root / "outputs"),
+                        "worker",
+                        "--once",
+                    ]
+                )
 
             self.assertEqual(code, 2)
             store = TaskStore(database)
@@ -292,7 +356,14 @@ class CliTests(unittest.TestCase):
             redirect_stderr(stderr),
         ):
             code = main(
-                ["--database", str(Path(tmp) / "state.sqlite3"), "worker", "--once"]
+                [
+                    "--database",
+                    str(Path(tmp) / "state.sqlite3"),
+                    "--output",
+                    str(Path(tmp) / "outputs"),
+                    "worker",
+                    "--once",
+                ]
             )
 
         self.assertEqual(code, 2)
@@ -331,6 +402,8 @@ class CliTests(unittest.TestCase):
                 [
                     "--database",
                     str(Path(tmp) / "state.sqlite3"),
+                    "--output",
+                    str(Path(tmp) / "outputs"),
                     "worker",
                     "--once",
                     "--max-tasks",

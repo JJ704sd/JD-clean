@@ -1,0 +1,257 @@
+{
+  "schema_version": "1.3",
+  "screening_record_id": "sr-ops-001",
+  "candidate_id": "candidate-001",
+  "candidate_name": "张三",
+  "role": "operations-devops-engineer",
+  "screening_basis": "provisional_baseline",
+  "jd_hard_gates_approved": false,
+  "jd_version": "operations-devops-engineer-2026-09-14-draft-v1",
+  "rubric_version": "operations-devops-rubric-2026-09-14-v5",
+  "screening_status": "non_final",
+  "recommendation": "second_review",
+  "summary": {
+    "conclusion_label": "建议二次复核",
+    "one_line_conclusion": "有 Linux 故障处置、云环境交付和模型网关运行证据；岗位规则尚未完成双角色校准。",
+    "top_strengths": [
+      {
+        "criterion_id": "OPS-LINUX-01",
+        "finding": "定位连接数耗尽并完成限流与验证"
+      },
+      {
+        "criterion_id": "OPS-MODEL-01",
+        "finding": "有模型超时切换和调用监控证据"
+      }
+    ],
+    "key_gaps": [
+      {
+        "criterion_id": "OPS-OBS-01",
+        "gap_type": "evidence_gap",
+        "finding": "简历未说明 SLO 口径与故障复盘闭环"
+      }
+    ],
+    "human_review_requirement": "岗位画像仍为 provisional_baseline，需先完成 JD 校准；之后由招聘责任人复核证据。",
+    "human_next_action": "请招聘负责人和用人经理确认岗位画像及 hard gate 口径。"
+  },
+  "hard_gate_conflicts": [],
+  "evidence": [
+    {
+      "criterion_id": "OPS-EDU-01",
+      "criterion_name": "学历与专业",
+      "state": "supported",
+      "strength": "E1",
+      "excerpt": "计算机科学与技术，本科",
+      "location": "教育经历",
+      "rationale": "简历明确写出学历层次和专业；本次草稿尚未把它设为已批准 hard gate。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-EXP-01",
+      "criterion_name": "相关经验年限",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "任职日期与相关运维职责不足以计算有效年限。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-LINUX-01",
+      "criterion_name": "Linux 与网络诊断",
+      "state": "supported",
+      "strength": "E3",
+      "excerpt": "订单 API 连接数持续增长后，我通过 ss 和连接池指标定位到连接未释放，增加超时回收并限流；发布后观察一周，连接耗尽告警由每日多次降为零。",
+      "location": "项目经历/订单平台",
+      "rationale": "有线上故障、个人诊断与处置、验证周期和结果；指标口径仍需人工核实。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-ENV-01",
+      "criterion_name": "环境、资源与云平台",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "负责在阿里云 ECS、VPC 和安全组上开通测试环境，并编写环境参数清单供开发自助申请。",
+      "location": "工作经历/平台运维",
+      "rationale": "说明实际云资源及个人环境交付动作，但扩缩容和回收职责未写。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-DB-01",
+      "criterion_name": "PostgreSQL、Redis 与消息队列",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "参与 PostgreSQL 主库迁移至托管 RDS，负责备份校验、只读切换和业务回归。",
+      "location": "项目经历/数据库迁移",
+      "rationale": "有迁移环节和可定位的个人操作，规模、恢复演练及回退条件需追问。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-DELIVERY-01",
+      "criterion_name": "容器、CI/CD 与变更",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "维护 Docker Compose 测试编排，并在 GitLab CI 增加镜像构建和部署前健康检查。",
+      "location": "工作经历/研发效能",
+      "rationale": "能定位编排及流水线个人工作；发布审批、回滚和留档未充分说明。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-OBS-01",
+      "criterion_name": "可观测、SLO 与事故闭环",
+      "state": "not_evidenced",
+      "strength": "E1",
+      "excerpt": "使用 Prometheus、Grafana",
+      "location": "技能清单",
+      "rationale": "只有工具名，没有告警闭环、SLO 或事故复盘责任证据。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-SEC-DR-01",
+      "criterion_name": "安全、凭据、审计与灾备",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未提供可定位的基线、凭据或灾备演练证据。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-MODEL-01",
+      "criterion_name": "模型 API 与网关运维",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "为模型 API 增加调用超时和配额告警，并在供应商限流时切换备用接口。",
+      "location": "项目经历/客服助手",
+      "rationale": "有线上网关治理动作；限流策略、密钥轮换和失败率变化需核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-RAG-01",
+      "criterion_name": "向量检索、RAG 与 Agent 运行链路",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未说明向量检索、RAG 或 Agent 链路的排查与回归。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-AI-GOV-01",
+      "criterion_name": "AI 成本、效果和版本变更",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历未说明 Token 台账、Prompt/模型灰度或回滚。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-AUTO-COST-01",
+      "criterion_name": "自动化、IaC 与资源成本",
+      "state": "supported",
+      "strength": "E3",
+      "excerpt": "编写 Python 脚本回收 30 天未使用的临时环境；执行前二次确认资源标签，运行后输出回收报告，一个季度减少 18% 测试云费用。",
+      "location": "项目经历/资源治理",
+      "rationale": "有脚本、执行护栏、结果口径；成本归因和覆盖资源范围仍需核对。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-COLLAB-01",
+      "criterion_name": "协作、文档与复盘",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "每次发布后与研发和测试复核检查项，并维护回滚步骤和变更记录。",
+      "location": "工作经历/发布流程",
+      "rationale": "有具体协作对象和文档产物，但事故复盘参与情况未说明。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-OWN-01",
+      "criterion_name": "项目独立承担与核心责任",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "作为运维接口人独立负责客服助手从预发到生产的发布链路，协调算法和应用团队完成限流、回滚和监控验收。",
+      "location": "项目经历/客服助手上线",
+      "rationale": "描述了明确的端到端职责和跨团队交付内容，影响结果仍需核验。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-AI-BONUS-01",
+      "criterion_name": "AI 深度使用与 AI 产品经验",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "参与内部 AI 客服产品从试点到正式上线，收集 12 名坐席两轮反馈并负责引用展示与人工兜底流程迭代；上线 6 周后坐席日活率为 83%，重复转人工率从试点期的 28% 降至 20%。",
+      "location": "项目经历/客服助手",
+      "rationale": "覆盖 AI 产品试点到上线、用户反馈迭代和可核验采用/结果，区别于模型网关与调用运维证据。",
+      "confidence": "medium"
+    },
+    {
+      "criterion_id": "OPS-OUTSOURCE-01",
+      "criterion_name": "外包/派遣经历排除信号（非计分）",
+      "state": "not_evidenced",
+      "strength": "E0",
+      "excerpt": null,
+      "location": null,
+      "rationale": "简历没有明确说明候选人本人的用工关系；当前草案下缺失该信息不产生不利结论。",
+      "confidence": "high"
+    },
+    {
+      "criterion_id": "OPS-SCALE-01",
+      "criterion_name": "运维项目复杂度与业务/用户规模",
+      "state": "supported",
+      "strength": "E2",
+      "excerpt": "客服助手日均处理约 2.6 万次咨询、活动峰值每分钟约 180 次，覆盖约 4,800 名内部操作用户，并接入订单系统、知识库与模型网关；我参与容量压测、峰值告警配置和上线后的 p95 延迟值班。",
+      "location": "项目经历/客服助手上线",
+      "rationale": "提供了统计周期、业务量和活动峰值、用户规模、关键依赖，以及容量/告警/延迟保障动作；本人承担范围和峰值统计窗口仍可在面试核实。",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    {
+      "code": "U10_RUBRIC_AMBIGUITY",
+      "description": "岗位 JD profile 尚未由招聘负责人和用人经理共同批准。",
+      "decision_impact": "岗位要求尚未确认为简历阶段 hard gate，因此本次不能据此形成正式推进或暂不推进建议。",
+      "required_human_action": "由招聘负责人和用人经理确认岗位画像、必须项与缺失信息处理规则，并发布新版本。",
+      "requires_second_review": true
+    }
+  ],
+  "interview_probes": [
+    {
+      "criterion_id": "OPS-EXP-01",
+      "question": "请按任职时间说明哪些工作属于运维、DevOps、SRE 或平台工程职责，并解释并行任职时段如何计算。",
+      "expected_signal": "日期与职责边界清晰，重叠时段不重复累计。"
+    },
+    {
+      "criterion_id": "OPS-DB-01",
+      "question": "PostgreSQL 迁移的备份恢复验证、停机窗口和回退条件分别是什么？你本人负责哪几项？",
+      "expected_signal": "能说明切换前后校验、恢复路径和个人责任。"
+    },
+    {
+      "criterion_id": "OPS-RAG-01",
+      "question": "如果 RAG 检索质量突然下降，你会如何区分索引更新、向量召回、Prompt 变化和模型供应商问题？",
+      "expected_signal": "有分层追踪、回归集、指标和降级思路。"
+    }
+  ],
+  "sensitive_attributes_used": false,
+  "human_review": {
+    "level_1_required": true,
+    "level_1_status": "pending",
+    "level_1_reviewer": null,
+    "level_1_decision": null,
+    "level_1_reviewed_at": null,
+    "level_2_required": true,
+    "level_2_status": "pending",
+    "level_2_mode": "independent_reviewer",
+    "level_2_reason_codes": [
+      "U10_RUBRIC_AMBIGUITY"
+    ],
+    "blind_review_required": true,
+    "blind_review_confirmed": null,
+    "level_2_reviewer": null,
+    "level_2_decision": null,
+    "level_2_reviewed_at": null,
+    "final_disposition": null,
+    "resolution": null
+  },
+  "automation_actions": []
+}

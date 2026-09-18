@@ -47,6 +47,28 @@ ROLE_WEIGHTS: dict[str, dict[str, int]] = {
         "INT-AI-01": 5,
         "INT-DOMAIN-01": 5,
     },
+    "operations-devops-engineer": {
+        "OPS-EDU-01": 2,
+        "OPS-EXP-01": 10,
+        "OPS-LINUX-01": 8,
+        "OPS-ENV-01": 7,
+        "OPS-DB-01": 8,
+        "OPS-DELIVERY-01": 8,
+        "OPS-OBS-01": 7,
+        "OPS-SEC-DR-01": 5,
+        "OPS-MODEL-01": 5,
+        "OPS-RAG-01": 4,
+        "OPS-AI-GOV-01": 4,
+        "OPS-AUTO-COST-01": 3,
+        "OPS-COLLAB-01": 3,
+        "OPS-OWN-01": 9,
+        "OPS-SCALE-01": 3,
+        "OPS-AI-BONUS-01": 3,
+        "OPS-OFFICE-IT-01": 5,
+        "OPS-OFFICE-NET-01": 5,
+        "OPS-DOMAIN-01": 1,
+        "OPS-OUTSOURCE-01": 0,
+    },
 }
 
 V13_SENIOR_WEIGHTS = {
@@ -60,6 +82,31 @@ V13_SENIOR_WEIGHTS = {
     "SEN-LEVEL-01": 16,
     "SEN-ADM-01": 2,
 }
+V14_SENIOR_WEIGHTS = V13_SENIOR_WEIGHTS
+V5_OPERATIONS_DEVOPS_RUBRIC_VERSION = "operations-devops-rubric-2026-09-14-v5"
+V5_OPERATIONS_DEVOPS_SCORING_VERSION = "operations-devops-score-2026-09-14-v5"
+OPERATIONS_DEVOPS_RUBRIC_VERSION = "operations-devops-rubric-2026-09-17-v1"
+OPERATIONS_DEVOPS_SCORING_VERSION = "operations-devops-score-2026-09-17-v1"
+V5_OPERATIONS_WEIGHTS = {
+    "OPS-EDU-01": 2,
+    "OPS-EXP-01": 10,
+    "OPS-LINUX-01": 9,
+    "OPS-ENV-01": 8,
+    "OPS-DB-01": 8,
+    "OPS-DELIVERY-01": 9,
+    "OPS-OBS-01": 7,
+    "OPS-SEC-DR-01": 5,
+    "OPS-MODEL-01": 5,
+    "OPS-RAG-01": 4,
+    "OPS-AI-GOV-01": 4,
+    "OPS-AUTO-COST-01": 3,
+    "OPS-COLLAB-01": 3,
+    "OPS-OWN-01": 11,
+    "OPS-AI-BONUS-01": 7,
+    "OPS-OUTSOURCE-01": 0,
+    "OPS-SCALE-01": 5,
+}
+DEFAULT_SCORING_VERSION = "evidence-score-2026-09-01-v2"
 
 @dataclass(frozen=True)
 class ScoreResult:
@@ -67,7 +114,7 @@ class ScoreResult:
     grade: str
     review_status: str
     components: dict[str, int | float]
-    scoring_version: str = "evidence-score-2026-09-01-v2"
+    scoring_version: str = DEFAULT_SCORING_VERSION
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -114,12 +161,15 @@ def score_record(record: dict[str, Any]) -> ScoreResult:
     by_criterion = {
         item.get("criterion_id"): item for item in evidence if isinstance(item, dict)
     }
-    weights = (
-        V13_SENIOR_WEIGHTS
-        if role == "senior-fullstack-engineer"
-        and record.get("rubric_version") == "senior-fullstack-2026-09-11-v13"
-        else ROLE_WEIGHTS[role]
-    )
+    rubric_version = record.get("rubric_version")
+    if role == "senior-fullstack-engineer" and rubric_version == "senior-fullstack-2026-09-14-v14":
+        weights = V14_SENIOR_WEIGHTS
+    elif role == "senior-fullstack-engineer" and rubric_version == "senior-fullstack-2026-09-11-v13":
+        weights = V13_SENIOR_WEIGHTS
+    elif role == "operations-devops-engineer" and rubric_version == V5_OPERATIONS_DEVOPS_RUBRIC_VERSION:
+        weights = V5_OPERATIONS_WEIGHTS
+    else:
+        weights = ROLE_WEIGHTS[role]
     if set(by_criterion) != set(weights):
         raise ValueError("evidence criteria do not match the approved role weights")
 
@@ -144,9 +194,16 @@ def score_record(record: dict[str, Any]) -> ScoreResult:
         components[criterion] = (
             int(value) if value == value.to_integral() else float(value)
         )
+    if role == "operations-devops-engineer" and rubric_version == OPERATIONS_DEVOPS_RUBRIC_VERSION:
+        scoring_version = OPERATIONS_DEVOPS_SCORING_VERSION
+    elif role == "operations-devops-engineer" and rubric_version == V5_OPERATIONS_DEVOPS_RUBRIC_VERSION:
+        scoring_version = V5_OPERATIONS_DEVOPS_SCORING_VERSION
+    else:
+        scoring_version = DEFAULT_SCORING_VERSION
     return ScoreResult(
         score=score,
         grade=_grade(score),
         review_status=_recommendation(record),
         components=components,
+        scoring_version=scoring_version,
     )
