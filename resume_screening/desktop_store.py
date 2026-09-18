@@ -26,6 +26,7 @@ ROLES = {
     "senior-fullstack-engineer": "资深全栈工程师",
     "fullstack-development-intern": "全栈开发实习生",
     "operations-devops-engineer": "运维开发工程师",
+    "business-system-operations-engineer": "业务系统运维工程师",
 }
 DECISIONS = ("未审阅", "有证据支持", "不符合", "信息不足")
 BACKUP_FORMAT_VERSION = 1

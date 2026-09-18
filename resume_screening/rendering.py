@@ -9,6 +9,7 @@ ROLE_LABELS = {
     "senior-fullstack-engineer": "资深全栈工程师",
     "fullstack-development-intern": "全栈开发实习生",
     "operations-devops-engineer": "运维开发工程师",
+    "business-system-operations-engineer": "业务系统运维工程师",
 }
 RECOMMENDATION_LABELS = {
     "advance_pending_human": "建议推进（待人工一审）",
@@ -27,7 +28,10 @@ def _summary(record: dict[str, Any]) -> tuple[str, list[str], list[str], str]:
         strengths = [item["finding"] for item in summary.get("top_strengths", [])]
         gaps = [item["finding"] for item in summary.get("key_gaps", [])]
         return summary["one_line_conclusion"], strengths, gaps, summary["next_step"]
-    if record["role"] == "operations-devops-engineer":
+    if record["role"] in {
+        "operations-devops-engineer",
+        "business-system-operations-engineer",
+    }:
         summary = record["summary"]
         strengths = [item["finding"] for item in summary.get("top_strengths", [])]
         gaps = [item["finding"] for item in summary.get("key_gaps", [])]

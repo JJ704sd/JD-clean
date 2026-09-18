@@ -69,6 +69,24 @@ ROLE_WEIGHTS: dict[str, dict[str, int]] = {
         "OPS-DOMAIN-01": 1,
         "OPS-OUTSOURCE-01": 0,
     },
+    "business-system-operations-engineer": {
+        "BSO-EXP-01": 8,
+        "BSO-INTAKE-01": 7,
+        "BSO-TROUBLE-01": 15,
+        "BSO-TRACK-01": 6,
+        "BSO-ESCALATE-01": 9,
+        "BSO-MAINT-01": 6,
+        "BSO-CONTINUITY-01": 9,
+        "BSO-KB-01": 5,
+        "BSO-IMPROVE-01": 7,
+        "BSO-SERVICE-01": 4,
+        "BSO-SEC-01": 5,
+        "BSO-COLLAB-01": 4,
+        "BSO-ENTERPRISE-01": 4,
+        "BSO-DATA-01": 4,
+        "BSO-TICKET-01": 3,
+        "BSO-TRAINING-01": 4,
+    },
 }
 
 V13_SENIOR_WEIGHTS = {
@@ -87,6 +105,8 @@ V5_OPERATIONS_DEVOPS_RUBRIC_VERSION = "operations-devops-rubric-2026-09-14-v5"
 V5_OPERATIONS_DEVOPS_SCORING_VERSION = "operations-devops-score-2026-09-14-v5"
 OPERATIONS_DEVOPS_RUBRIC_VERSION = "operations-devops-rubric-2026-09-17-v1"
 OPERATIONS_DEVOPS_SCORING_VERSION = "operations-devops-score-2026-09-17-v1"
+BUSINESS_SYSTEM_OPERATIONS_RUBRIC_VERSION = "business-system-operations-rubric-2026-09-18-v1"
+BUSINESS_SYSTEM_OPERATIONS_SCORING_VERSION = "business-system-operations-score-2026-09-18-v1"
 V5_OPERATIONS_WEIGHTS = {
     "OPS-EDU-01": 2,
     "OPS-EXP-01": 10,
@@ -198,6 +218,8 @@ def score_record(record: dict[str, Any]) -> ScoreResult:
         scoring_version = OPERATIONS_DEVOPS_SCORING_VERSION
     elif role == "operations-devops-engineer" and rubric_version == V5_OPERATIONS_DEVOPS_RUBRIC_VERSION:
         scoring_version = V5_OPERATIONS_DEVOPS_SCORING_VERSION
+    elif role == "business-system-operations-engineer" and rubric_version == BUSINESS_SYSTEM_OPERATIONS_RUBRIC_VERSION:
+        scoring_version = BUSINESS_SYSTEM_OPERATIONS_SCORING_VERSION
     else:
         scoring_version = DEFAULT_SCORING_VERSION
     return ScoreResult(

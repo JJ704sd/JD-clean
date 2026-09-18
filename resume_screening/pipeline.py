@@ -33,6 +33,7 @@ from .rendering import render_conclusion
 from .scoring import score_record
 from .versions import contract_matches
 from .operations_assembly import assemble_operations_record
+from .business_operations_assembly import assemble_business_operations_record
 
 
 class ModelClient(Protocol):
@@ -276,6 +277,16 @@ class ScreeningPipeline:
                     )
                 elif task.role == "operations-devops-engineer":
                     record = assemble_operations_record(
+                        record,
+                        screening_record_id=f"sr-{task.task_id:08d}",
+                        candidate_id=task.candidate_id,
+                        candidate_name=task.candidate_name,
+                        jd_version=task.jd_version,
+                        rubric_version=task.rubric_version,
+                        resume_text=cleaned.model_text,
+                    )
+                elif task.role == "business-system-operations-engineer":
+                    record = assemble_business_operations_record(
                         record,
                         screening_record_id=f"sr-{task.task_id:08d}",
                         candidate_id=task.candidate_id,

@@ -65,6 +65,16 @@ def documented_record(skill_dir: str) -> dict:
                 / "example-record-v6.json"
             ).read_text(encoding="utf-8")
         )
+    if skill_dir == "screen-business-system-operations-resumes":
+        return json.loads(
+            (
+                ROOT
+                / "skills"
+                / skill_dir
+                / "references"
+                / "example-record.json"
+            ).read_text(encoding="utf-8")
+        )
     contract = ROOT / "skills" / skill_dir / "references" / "output-contract.md"
     match = re.search(
         r"```json\s*(.*?)\s*```", contract.read_text(encoding="utf-8"), re.DOTALL

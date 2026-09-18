@@ -26,6 +26,11 @@ OPERATIONS_DEVOPS_RUBRIC_VERSION = "operations-devops-rubric-2026-09-17-v1"
 OPERATIONS_DEVOPS_SCORING_VERSION = "operations-devops-score-2026-09-17-v1"
 OPERATIONS_DEVOPS_PROMPT_VERSION = "operations-devops-screening-prompt-2026-09-17-v1"
 
+BUSINESS_SYSTEM_OPERATIONS_JD_VERSION = "business-system-operations-engineer-2026-09-18-draft-v1"
+BUSINESS_SYSTEM_OPERATIONS_RUBRIC_VERSION = "business-system-operations-rubric-2026-09-18-v1"
+BUSINESS_SYSTEM_OPERATIONS_SCORING_VERSION = "business-system-operations-score-2026-09-18-v1"
+BUSINESS_SYSTEM_OPERATIONS_PROMPT_VERSION = "business-system-operations-screening-prompt-2026-09-18-v1"
+
 ROLE_VERSIONS: dict[str, tuple[str, str]] = {
     "ai-product-manager": ("ai-pm-2026-08-v2", "ai-pm-rubric-2026-08-18-v3"),
     "senior-fullstack-engineer": (
@@ -40,6 +45,10 @@ ROLE_VERSIONS: dict[str, tuple[str, str]] = {
         OPERATIONS_DEVOPS_JD_VERSION,
         OPERATIONS_DEVOPS_RUBRIC_VERSION,
     ),
+    "business-system-operations-engineer": (
+        BUSINESS_SYSTEM_OPERATIONS_JD_VERSION,
+        BUSINESS_SYSTEM_OPERATIONS_RUBRIC_VERSION,
+    ),
 }
 
 # A tuple is (jd_version, rubric_version, parser_version, scoring_version,
@@ -52,9 +61,13 @@ ACTIVE_CONTRACTS: dict[str, tuple[str, str, str, str, str]] = {
         PARSER_VERSION,
         OPERATIONS_DEVOPS_SCORING_VERSION
         if role == "operations-devops-engineer"
+        else BUSINESS_SYSTEM_OPERATIONS_SCORING_VERSION
+        if role == "business-system-operations-engineer"
         else SCORING_VERSION,
         OPERATIONS_DEVOPS_PROMPT_VERSION
         if role == "operations-devops-engineer"
+        else BUSINESS_SYSTEM_OPERATIONS_PROMPT_VERSION
+        if role == "business-system-operations-engineer"
         else PROMPT_VERSION,
     )
     for role, (jd, rubric) in ROLE_VERSIONS.items()

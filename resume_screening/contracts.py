@@ -13,6 +13,7 @@ ROLE_SKILL_DIRS = {
     "senior-fullstack-engineer": "screen-senior-fullstack-resumes",
     "fullstack-development-intern": "screen-fullstack-intern-resumes",
     "operations-devops-engineer": "screen-operations-devops-resumes",
+    "business-system-operations-engineer": "screen-business-system-operations-resumes",
 }
 
 
@@ -23,11 +24,19 @@ def _load_module(path: Path, name: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     module_directory = str(path.parent)
     inserted = module_directory not in sys.path
+    # Validators import their sibling profile validator as the plain module
+    # name ``validate_jd_profile``. Isolate that dependency while loading each
+    # role so one role's validator cannot remain cached for another role.
+    dependency_name = "validate_jd_profile"
+    previous_dependency = sys.modules.pop(dependency_name, None)
     if inserted:
         sys.path.insert(0, module_directory)
     try:
         spec.loader.exec_module(module)
     finally:
+        sys.modules.pop(dependency_name, None)
+        if previous_dependency is not None:
+            sys.modules[dependency_name] = previous_dependency
         if inserted:
             sys.path.remove(module_directory)
     return module

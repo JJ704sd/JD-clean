@@ -34,7 +34,11 @@ def _sha256_text(value: str) -> str:
 
 
 def _summary(record: dict[str, Any]) -> str:
-    if record.get("role") in {"ai-product-manager", "operations-devops-engineer"}:
+    if record.get("role") in {
+        "ai-product-manager",
+        "operations-devops-engineer",
+        "business-system-operations-engineer",
+    }:
         value = record.get("summary")
         if isinstance(value, dict):
             return str(value.get("one_line_conclusion") or "")

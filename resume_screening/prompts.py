@@ -56,6 +56,18 @@ ROLE_SKILL_FILES = {
             "references/example-record.json",
         ),
     ),
+    "business-system-operations-engineer": (
+        "screen-business-system-operations-resumes",
+        (
+            "SKILL.md",
+            "references/jd-profile.md",
+            "references/rubric.md",
+            "references/human-review-policy.md",
+            "references/conclusion-format.md",
+            "references/output-contract.md",
+            "references/example-record.json",
+        ),
+    ),
 }
 
 
@@ -109,7 +121,11 @@ def build_system_prompt(
         "，不要使用 Markdown 代码围栏，不要输出解释性前后缀"
         "，不要输出模型自拟总分或等级。"
     )
-    evidence_only = role in {"senior-fullstack-engineer", "operations-devops-engineer"} or (
+    evidence_only = role in {
+        "senior-fullstack-engineer",
+        "operations-devops-engineer",
+        "business-system-operations-engineer",
+    } or (
         role == "ai-product-manager"
         and prompt_version != "resume-screening-prompt-2026-09-01-v2"
     )
@@ -121,6 +137,8 @@ def build_system_prompt(
         criterion_count = (
             9
             if role == "senior-fullstack-engineer"
+            else 16
+            if role == "business-system-operations-engineer"
             else 20
             if role == "operations-devops-engineer"
             and rubric_version == "operations-devops-rubric-2026-09-17-v1"
@@ -128,7 +146,7 @@ def build_system_prompt(
             if role == "operations-devops-engineer"
             else 8
         )
-        if role == "operations-devops-engineer":
+        if role in {"operations-devops-engineer", "business-system-operations-engineer"}:
             probe_contract = "输出 3 至 6 个不重复问题；每项包含 criterion_id、question、expected_signal。"
         else:
             probe_contract = (
@@ -136,7 +154,16 @@ def build_system_prompt(
                 if role == "senior-fullstack-engineer"
                 else "输出 3 至 6 个不重复问题；可使用字符串，或包含 question 的对象。"
             )
-        if role == "operations-devops-engineer":
+        if role == "business-system-operations-engineer":
+            criterion_ids = "BSO-EXP-01、BSO-INTAKE-01、BSO-TROUBLE-01、BSO-TRACK-01、BSO-ESCALATE-01、BSO-MAINT-01、BSO-CONTINUITY-01、BSO-KB-01、BSO-IMPROVE-01、BSO-SERVICE-01、BSO-SEC-01、BSO-COLLAB-01、BSO-ENTERPRISE-01、BSO-DATA-01、BSO-TICKET-01、BSO-TRAINING-01"
+            evidence_contract = f"""- evidence：必须恰好覆盖业务系统运维工程师 Rubric 的 16 个 criterion：{criterion_ids}。每项只包含 criterion_id、state、excerpt、location、rationale、confidence、evidence_factors；不得输出 strength 或 criterion_name，Python 将按证据事实生成正式字段。
+- evidence_factors 必须包含 project_context、personal_action、method_or_tradeoff、result_scope、verifiable_impact 五个字段；只能填写简历原文支持的最短事实，未提供则为 null，不得推断，也不得把同一句空泛描述重复填入不同维度。
+- 只有业务/系统/问题背景与候选人本人动作同时可定位时，能力维度才可标记 supported；只有技能清单、岗位头衔、自评、产品名或工具名时使用 not_evidenced，并保留 E1 线索。
+- BSO-INTAKE-01、BSO-TROUBLE-01、BSO-TRACK-01、BSO-ESCALATE-01、BSO-MAINT-01 和 BSO-CONTINUITY-01 要分别取证，不要把“支持用户”一句话重复填入多个维度。排障必须尽量保留现象、影响、定位步骤、本人处理和验证结果；转交必须保留复现信息与跟进动作。
+- BSO-ENTERPRISE-01、BSO-DATA-01、BSO-TICKET-01、BSO-TRAINING-01 是加分维度，缺失不写成核心能力否定；企业系统名称或工具名本身最多形成 E1 线索。
+- 当前岗位画像是 provisional_baseline。不得输出 hard gate 冲突、暂不推进或任何总分/等级；Python 将把直接不满足描述转为待核实证据并固定 recommendation=second_review。"""
+            trace_contract = "所有非空证据必须包含最短可核对原文和页码/章节位置；无证据使用 null 原文和位置。"
+        elif role == "operations-devops-engineer":
             is_current_operations = rubric_version == "operations-devops-rubric-2026-09-17-v1"
             criterion_ids = (
                 "OPS-EDU-01、OPS-EXP-01、OPS-LINUX-01、OPS-ENV-01、OPS-DB-01、OPS-DELIVERY-01、OPS-OBS-01、OPS-SEC-DR-01、OPS-MODEL-01、OPS-RAG-01、OPS-AI-GOV-01、OPS-AUTO-COST-01、OPS-COLLAB-01、OPS-OWN-01、OPS-SCALE-01、OPS-AI-BONUS-01、OPS-OUTSOURCE-01、OPS-OFFICE-IT-01、OPS-OFFICE-NET-01、OPS-DOMAIN-01"

@@ -9,14 +9,28 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from validate_jd_profile import CRITERIA as PROFILE_CRITERIA
-from validate_jd_profile import JD_VERSION, ROLE, RUBRIC_VERSION, validate_profile
-
-EXPECTED_ROLE = ROLE
-EXPECTED_JD_VERSION = JD_VERSION
-EXPECTED_RUBRIC_VERSION = RUBRIC_VERSION
+EXPECTED_ROLE = "business-system-operations-engineer"
+EXPECTED_JD_VERSION = "business-system-operations-engineer-2026-09-18-draft-v1"
+EXPECTED_RUBRIC_VERSION = "business-system-operations-rubric-2026-09-18-v1"
 SCHEMA_VERSION = "1.0"
-CRITERIA = tuple(PROFILE_CRITERIA)
+CRITERIA = (
+    "BSO-EXP-01",
+    "BSO-INTAKE-01",
+    "BSO-TROUBLE-01",
+    "BSO-TRACK-01",
+    "BSO-ESCALATE-01",
+    "BSO-MAINT-01",
+    "BSO-CONTINUITY-01",
+    "BSO-KB-01",
+    "BSO-IMPROVE-01",
+    "BSO-SERVICE-01",
+    "BSO-SEC-01",
+    "BSO-COLLAB-01",
+    "BSO-ENTERPRISE-01",
+    "BSO-DATA-01",
+    "BSO-TICKET-01",
+    "BSO-TRAINING-01",
+)
 CRITERION_NAMES = {
     "BSO-EXP-01": "相关应用支持/系统运维/实施/服务台经验",
     "BSO-INTAKE-01": "业务问题承接与诉求澄清",
@@ -68,6 +82,31 @@ SUMMARY_LABELS = {
     "do_not_advance_pending_human": "暂不推进（待人工一审与二次复核）",
 }
 GAP_TYPES = {"evidence_gap", "conflicting_facts", "direct_contradiction"}
+
+
+def validate_profile(profile: Any) -> list[str]:
+    """Keep record validation independent from same-named role modules."""
+
+    if not isinstance(profile, dict):
+        return ["profile must be a JSON object"]
+    errors: list[str] = []
+    if profile.get("schema_version") != "1.0":
+        errors.append("schema_version must be '1.0'")
+    if profile.get("role") != EXPECTED_ROLE:
+        errors.append(f"profile role must be {EXPECTED_ROLE!r}")
+    if profile.get("jd_version") != EXPECTED_JD_VERSION:
+        errors.append(f"profile jd_version must be {EXPECTED_JD_VERSION!r}")
+    if profile.get("rubric_version") != EXPECTED_RUBRIC_VERSION:
+        errors.append(f"profile rubric_version must be {EXPECTED_RUBRIC_VERSION!r}")
+    if profile.get("jd_hard_gates_approved") is not False:
+        errors.append("draft profile must set jd_hard_gates_approved=false")
+    criteria = profile.get("criteria")
+    if not isinstance(criteria, list):
+        return errors + ["profile criteria must be a list"]
+    ids = [item.get("criterion_id") for item in criteria if isinstance(item, dict)]
+    if len(ids) != len(CRITERIA) or set(ids) != set(CRITERIA):
+        errors.append("profile criteria must contain each role criterion exactly once")
+    return errors
 
 
 def nonempty(value: Any) -> bool:
