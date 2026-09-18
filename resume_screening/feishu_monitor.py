@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -62,8 +63,6 @@ DEFAULT_PROCESSED_AT_COLUMN = "处理时间"
 DEFAULT_SOURCE_HASH_COLUMN = "源 PDF 哈希"
 DEFAULT_AI_COLUMN = "岗位匹配度"
 DEFAULT_JOB_PREFIX = "全栈工程师_深圳 15-25K"
-DEFAULT_SCREENING_DATABASE = PROJECT_ROOT / "var" / "screening-v8.sqlite3"
-DEFAULT_SCREENING_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs"
 PDF_KEY_RULE = rf"^【{re.escape(DEFAULT_JOB_PREFIX)}】(?P<name>.+?)\s+(?:10年以上|\d+年)\.pdf$"
 OPAQUE_SCAN_RE = re.compile(r"[A-Za-z0-9_-]{40,}~~")
 EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[\w-]+", re.IGNORECASE | re.UNICODE)
@@ -82,6 +81,102 @@ REQUIRED_HEADINGS = (
     "## 证书与语言能力",
     "## 其他信息",
 )
+# The Markdown writer is also consumed by Feishu's document importer.  Feishu
+# accepts the documented XML-style inline tags while parsing Markdown, so use a
+# small, portable span for recruiter-facing keyword emphasis instead of raw
+# HTML/CSS that would be shown literally by other Markdown renderers.
+TECH_STACK_TERMS = (
+    "Cloudflare Workers",
+    "Cloudflare Worker",
+    "Docker Compose",
+    "React Native",
+    "Spring Boot",
+    "Tailwind CSS",
+    "TailwindCSS",
+    "Lightweight-charts",
+    "React.js",
+    "Vue.js",
+    "Next.js",
+    "Node.js",
+    "Nodejs",
+    "TypeScript",
+    "JavaScript",
+    "GraphQL",
+    "Drizzle ORM",
+    "Playwright",
+    "Streamlit",
+    "Kubernetes",
+    "PostgreSQL",
+    "MongoDB",
+    "Cloudflare",
+    "Tailwind",
+    "Webpack",
+    "ReactJS",
+    "React",
+    "Vue",
+    "Next",
+    "Nuxt",
+    "Svelte",
+    "Flutter",
+    "UniApp",
+    "uni-app",
+    "pnpm",
+    "npm",
+    "yarn",
+    "Vite",
+    "Eslint",
+    "ESLint",
+    "Prettier",
+    "JSDoc",
+    "Hono",
+    "SQL",
+    "MySQL",
+    "Redis",
+    "Nginx",
+    "Docker",
+    "Ubuntu",
+    "AWS",
+    "Sentry",
+    "GitHub",
+    "Git",
+    "Python",
+    "Golang",
+    "Go",
+    "Java",
+    "C#",
+    "C++",
+    "Django",
+    "FastAPI",
+    "Spring",
+    "Shell",
+    "Bash",
+    "Web3",
+    "Wagmi",
+    "Ethers",
+    "Solana",
+    "IPFS",
+    "LLM",
+    "MCP",
+    "Dify",
+    "OpenClaw",
+    "CI/CD",
+    "Monorepo",
+    "SDK",
+    "REST API",
+    "API",
+    "HTML",
+    "CSS",
+)
+TECH_STACK_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    + "|".join(re.escape(term) for term in sorted(set(TECH_STACK_TERMS), key=len, reverse=True))
+    + r")(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+INLINE_LITERAL_PATTERN = re.compile(r"`[^`\n]+`|https?://[^\s)]+", re.IGNORECASE)
+TECH_STACK_HIGHLIGHT_TEMPLATE = '<span background-color="light-yellow">{}</span>'
+RICH_HIGHLIGHT_MARKER = 'background-color="light-yellow"'
+RICH_HIGHLIGHT_PATTERN = re.compile(r'<span\b[^>]*background-color="[^"]+"', re.IGNORECASE)
 SECTION_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("个人简介", ("个人简介", "个人优势", "自我评价", "自我介绍", "核心优势", "个人概况")),
     ("教育经历", ("教育经历", "教育背景", "学历背景", "教育情况", "Education")),
@@ -120,6 +215,7 @@ class MonitorConfig:
     row_key_column: str = DEFAULT_ROW_KEY_COLUMN
     job_prefix: str = DEFAULT_JOB_PREFIX
     link_column: str = DEFAULT_LINK_COLUMN
+    link_only_writeback: bool = False
     status_column: str = DEFAULT_STATUS_COLUMN
     error_column: str = DEFAULT_ERROR_COLUMN
     processed_at_column: str = DEFAULT_PROCESSED_AT_COLUMN
@@ -135,8 +231,8 @@ class MonitorConfig:
     max_files: int | None = None
     retry_failed: bool = False
     screening_enabled: bool = False
-    screening_database: Path = DEFAULT_SCREENING_DATABASE
-    screening_output_directory: Path = DEFAULT_SCREENING_OUTPUT_DIRECTORY
+    screening_database: Path | None = None
+    screening_output_directory: Path | None = None
     screening_role: str = DEFAULT_SCREENING_ROLE
     screening_model: str = DEFAULT_SCREENING_MODEL
 
@@ -385,6 +481,71 @@ class LarkCLI:
         return CliResponse(result.returncode, payload, stderr, stdout)
 
 
+def apply_rich_document_content(
+    cli: LarkCLI,
+    document_url: str,
+    rich_content_path: Path,
+) -> tuple[bool, str | None]:
+    """Overwrite a document with DocxXML and verify persisted rich text."""
+
+    try:
+        source = rich_content_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"cannot read rich content: {exc}"
+    if not source.strip():
+        return False, "rich content is empty"
+    updated = cli.run(
+        [
+            "docs",
+            "+update",
+            "--doc",
+            document_url,
+            "--command",
+            "overwrite",
+            "--content",
+            "@" + relative_to_root(rich_content_path),
+            "--doc-format",
+            "xml",
+            "--as",
+            "user",
+            "--format",
+            "json",
+        ],
+        timeout=90,
+    )
+    if not updated.ok:
+        return False, "rich content update failed: " + updated.diagnostic
+
+    verified = cli.run(
+        [
+            "docs",
+            "+fetch",
+            "--doc",
+            document_url,
+            "--doc-format",
+            "xml",
+            "--detail",
+            "full",
+            "--as",
+            "user",
+            "--format",
+            "json",
+        ],
+        timeout=90,
+    )
+    if not verified.ok:
+        return False, "rich content readback failed: " + verified.diagnostic
+    payload = verified.payload if isinstance(verified.payload, dict) else {}
+    data = payload.get("data") if isinstance(payload, dict) else None
+    document = data.get("document") if isinstance(data, dict) else None
+    persisted = document.get("content") if isinstance(document, dict) else None
+    if not isinstance(persisted, str) or not persisted.strip():
+        return False, "rich content readback returned an empty document"
+    if RICH_HIGHLIGHT_MARKER in source and not RICH_HIGHLIGHT_PATTERN.search(persisted):
+        return False, "rich content readback lost the technical-keyword highlight"
+    return True, None
+
+
 class DestinationLock:
     """Cross-process exclusive lock for a single Feishu folder destination."""
 
@@ -488,15 +649,25 @@ def field_options(field: dict[str, Any]) -> set[str]:
     return {cell_text(item.get("name") if isinstance(item, dict) else item) for item in options}
 
 
-def writeback_diagnostics(config: MonitorConfig, fields: dict[str, dict[str, Any]]) -> list[str]:
+def writeback_diagnostics(
+    config: MonitorConfig,
+    fields: dict[str, dict[str, Any]],
+    *,
+    link_only: bool = False,
+) -> list[str]:
     diagnostics: list[str] = []
     expected = {
         config.link_column: {"text", "url"},
-        config.status_column: {"text", "select"},
-        config.error_column: {"text"},
-        config.processed_at_column: {"datetime"},
-        config.source_hash_column: {"text"},
     }
+    if not link_only:
+        expected.update(
+            {
+                config.status_column: {"text", "select"},
+                config.error_column: {"text"},
+                config.processed_at_column: {"datetime"},
+                config.source_hash_column: {"text"},
+            }
+        )
     for name, types in expected.items():
         field = fields.get(name)
         if field is None:
@@ -518,6 +689,8 @@ def build_writeback_updates(
     source_hash: str,
     processed_at: str,
 ) -> dict[str, Any]:
+    if config.link_only_writeback:
+        return {config.link_column: document_url}
     status_field = fields[config.status_column]
     status_value: Any = ["success"] if str(status_field.get("type")).casefold() == "select" else "success"
     return {
@@ -563,21 +736,157 @@ def normalize_body(text: str) -> str:
     return "\n".join(lines)
 
 
-def structured_markdown(cleaned: Any, candidate_name: str) -> str:
-    frontmatter = (
-        "---\n"
-        f"candidate_id: {cleaned.candidate_id}\n"
-        f"source_sha256: {cleaned.source_sha256}\n"
-        f"parser_version: {cleaned.parser_version}\n"
-        f"generated_at: {now_utc()}\n"
-        f"used_ocr: {str(cleaned.used_ocr).lower()}\n"
-        f"page_count: {cleaned.page_count}\n"
-        "document_format: structured_resume_markdown\n"
-        "privacy: pii_redacted\n"
-        "---\n\n"
+def _is_cjk(character: str) -> bool:
+    return bool(character) and (
+        "\u2e80" <= character <= "\u9fff"
+        or "\uac00" <= character <= "\ud7a3"
+        or "\uf900" <= character <= "\ufaff"
     )
+
+
+def _join_wrapped_lines(lines: Sequence[str]) -> str:
+    """Join a visually wrapped extracted line without changing its words."""
+
+    if not lines:
+        return ""
+    result = lines[0]
+    for line in lines[1:]:
+        if not result or not line:
+            result += line
+        elif result[-1].isspace() or line[0] in ",.!?;:，。！？；：、)]}）】》”’":
+            result += line
+        elif _is_cjk(result[-1]) and _is_cjk(line[0]):
+            result += line
+        else:
+            result += " " + line
+    return result
+
+
+def _starts_presentation_block(line: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:#{1,6}\s|(?:[-*•]\s)|>>\s|\d{4}[./-]\d{1,2}|[^\s:：]{1,16}[:：])",
+            line,
+        )
+    )
+
+
+def _presentation_blocks(text: str) -> list[str]:
+    """Turn extraction lines into readable Markdown paragraphs.
+
+    Standard Markdown has no portable line-height or letter-spacing control.
+    Separate semantic blocks with one blank line instead of inserting spaces
+    into words, which keeps copy/search and recruiter parsing reliable while
+    giving Feishu a more breathable paragraph rhythm.
+    """
+
+    blocks: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            blocks.append(_join_wrapped_lines(current))
+            current.clear()
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        if current and _starts_presentation_block(line):
+            flush()
+        current.append(line)
+    flush()
+    return blocks
+
+
+def _highlight_technical_terms(text: str) -> str:
+    """Highlight only terms present in the resume, preserving URLs/code spans."""
+
+    protected: list[str] = []
+
+    def protect(match: re.Match[str]) -> str:
+        token = f"\x00{len(protected)}\x00"
+        protected.append(match.group(0))
+        return token
+
+    masked = INLINE_LITERAL_PATTERN.sub(protect, text)
+    highlighted = TECH_STACK_PATTERN.sub(
+        lambda match: TECH_STACK_HIGHLIGHT_TEMPLATE.format(match.group(0)),
+        masked,
+    )
+    for index, original in enumerate(protected):
+        highlighted = highlighted.replace(f"\x00{index}\x00", original)
+    return highlighted
+
+
+def _format_section_value(value: str) -> str:
+    normalized = normalize_body(value)
+    blocks = _presentation_blocks(normalized)
+    if not blocks:
+        return "未提及"
+    return "\n\n".join(_highlight_technical_terms(block) for block in blocks)
+
+
+def _xml_inline_text(text: str) -> str:
+    """Escape Markdown text while preserving our documented highlight spans."""
+
+    parts: list[str] = []
+    last = 0
+    for match in re.finditer(
+        r'<span background-color="light-yellow">(.*?)</span>',
+        text,
+        flags=re.DOTALL,
+    ):
+        parts.append(html.escape(text[last : match.start()], quote=False))
+        parts.append(TECH_STACK_HIGHLIGHT_TEMPLATE.format(html.escape(match.group(1), quote=False)))
+        last = match.end()
+    parts.append(html.escape(text[last:], quote=False))
+    return "".join(parts).replace("\n", "<br/>")
+
+
+def structured_xml(markdown: str) -> str:
+    """Convert presentation Markdown to the DocxXML accepted by Feishu.
+
+    Markdown import is useful for portability, but the Markdown importer does
+    not persist inline ``span`` styles.  The XML sidecar is therefore the
+    canonical rich-text payload used for the final online document update.
+    """
+
+    blocks = [block.strip() for block in markdown.split("\n\n") if block.strip()]
+    xml_blocks: list[str] = []
+    index = 0
+    while index < len(blocks):
+        block = blocks[index]
+        if block.startswith("# "):
+            xml_blocks.append(f"<title>{_xml_inline_text(block[2:].strip())}</title>")
+        elif block.startswith("## "):
+            xml_blocks.append(f"<h1>{_xml_inline_text(block[3:].strip())}</h1>")
+        elif re.match(r"^(?:[-*•])\s+", block):
+            items: list[str] = []
+            while index < len(blocks) and re.match(r"^(?:[-*•])\s+", blocks[index]):
+                items.append(re.sub(r"^(?:[-*•])\s+", "", blocks[index], count=1))
+                index += 1
+            xml_blocks.append("<ul>" + "".join(f"<li>{_xml_inline_text(item)}</li>" for item in items) + "</ul>")
+            continue
+        elif block.startswith(">> "):
+            xml_blocks.append(f"<blockquote><p>{_xml_inline_text(block[3:].strip())}</p></blockquote>")
+        else:
+            xml_blocks.append(f"<p>{_xml_inline_text(block)}</p>")
+        index += 1
+    return "".join(xml_blocks)
+
+
+def structured_markdown(cleaned: Any, candidate_name: str) -> str:
     body = cleaned.markdown.split("---\n\n", 1)[-1]
     body = redact_for_model(_strip_opaque_platform_tokens(body), candidate_name=candidate_name)
+    # Model input stays name-redacted, while the recruiter-facing online copy
+    # must retain the verified candidate name for matching and review.  Replace
+    # only the placeholder introduced by the redactor; phone, email, address,
+    # and identity-number redactions remain intact.
+    display_name = unicodedata.normalize("NFKC", candidate_name.strip()) if candidate_name and candidate_name.strip() else ""
+    if display_name:
+        body = body.replace("[候选人]", f"姓名: {display_name}")
     body = normalize_body(body)
     markers = list(marker_regex().finditer(body))
     sections: dict[str, list[str]] = {name: [] for name, _ in SECTION_PATTERNS}
@@ -591,21 +900,54 @@ def structured_markdown(cleaned: Any, candidate_name: str) -> str:
             sections.setdefault(section, []).append(body[start:end])
     else:
         sections["基本信息"] = [body]
+    if display_name and not any(display_name in part for part in sections.get("基本信息", [])):
+        sections["基本信息"].insert(0, f"姓名: {display_name}")
+    # Some PDFs place the only education evidence in the basic-information
+    # block (for example, "所学专业" and "学历") rather than a standalone
+    # heading.  Keep the source evidence in the dedicated display section so
+    # the online resume does not falsely present an empty education history.
+    if not any(part.strip() for part in sections.get("教育经历", [])):
+        basic_text = "\n".join(sections.get("基本信息", []))
+        education_lines = [
+            line.strip()
+            for line in basic_text.splitlines()
+            if re.search(r"学历|所学专业|教育|毕业院校|毕业学校", line)
+        ]
+        if education_lines:
+            sections["教育经历"] = ["\n".join(education_lines)]
     output: list[str] = [
         "# 简历",
         "",
-        "> 本文由本地 PDF 文本层提取/OCR 回退后脱敏整理；未提及信息统一标为“未提及”。",
-        "",
     ]
     for section in ("基本信息", "个人简介", "教育经历", "工作经历", "项目经历", "技能", "证书与语言能力", "其他信息"):
-        value = normalize_body("\n\n".join(part.strip() for part in sections.get(section, []) if part.strip())) or "未提及"
+        value = _format_section_value(
+            "\n\n".join(part.strip() for part in sections.get(section, []) if part.strip())
+        )
         output.extend((f"## {section}", "", value, ""))
-    return frontmatter + "\n".join(output).rstrip() + "\n"
+    return "\n".join(output).rstrip() + "\n"
 
 
 def markdown_quality_issues(content: str) -> list[str]:
     issues: list[str] = []
-    missing = [heading for heading in REQUIRED_HEADINGS if heading not in content]
+    if content.lstrip().startswith("---"):
+        issues.append("presentation Markdown contains metadata frontmatter")
+
+    def normalize_heading(value: str) -> str:
+        value = re.sub(r"[*_`]", "", value)
+        return " ".join(value.split())
+
+    actual_headings: set[str] = set()
+    heading_pattern = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+    for line in content.splitlines():
+        match = heading_pattern.match(line)
+        if match:
+            actual_headings.add(normalize_heading(match.group(1)))
+    missing = [
+        heading
+        for heading in REQUIRED_HEADINGS
+        if normalize_heading(re.sub(r"^#{1,6}\s*", "", heading))
+        not in actual_headings
+    ]
     if missing:
         issues.append("missing headings: " + ",".join(missing))
     if not content.strip():
@@ -637,11 +979,15 @@ def prepare_markdown(path: Path, candidate_id: str, candidate_name: str, output_
     destination = output_directory / candidate_id
     atomic_write(destination / "resume.cleaned.md", cleaned.markdown)
     atomic_write(destination / "resume.feishu.md", structured)
+    rich_content = structured_xml(structured)
+    atomic_write(destination / "resume.feishu.xml", rich_content)
     return {
         "candidate_id": candidate_id,
         "markdown_path": str((destination / "resume.feishu.md").resolve()),
         "cleaned_markdown_path": str((destination / "resume.cleaned.md").resolve()),
+        "rich_content_path": str((destination / "resume.feishu.xml").resolve()),
         "markdown_chars": len(structured),
+        "rich_content_chars": len(rich_content),
         "page_count": cleaned.page_count,
         "used_ocr": cleaned.used_ocr,
         "parser_version": PARSER_VERSION,
@@ -670,10 +1016,19 @@ def preflight_fingerprint(config: MonitorConfig, fields: dict[str, dict[str, Any
         "pdf_directory": str(config.pdf_directory),
         "row_key_column": config.row_key_column,
         "required_columns": config.required_columns,
+        "link_only_writeback": config.link_only_writeback,
         "screening": {
             "enabled": config.screening_enabled,
-            "database": str(config.screening_database),
-            "output_directory": str(config.screening_output_directory),
+            "database": (
+                str(config.screening_database)
+                if config.screening_database
+                else None
+            ),
+            "output_directory": (
+                str(config.screening_output_directory)
+                if config.screening_output_directory
+                else None
+            ),
             "role": config.screening_role,
             "model": config.screening_model,
         },
@@ -768,12 +1123,22 @@ def unresolved_import_reason(entry: dict[str, Any]) -> str:
     return reason
 
 
+def link_value_matches(actual: Any, expected: Any) -> bool:
+    actual_text = cell_text(actual)
+    expected_text = cell_text(expected)
+    return bool(expected_text) and (
+        actual_text == expected_text or expected_text in actual_text
+    )
+
+
 def compare_writeback(config: MonitorConfig, values: Sequence[Any], expected: dict[str, Any]) -> bool:
+    if config.link_only_writeback:
+        return bool(values) and link_value_matches(values[0], expected[config.link_column])
     ordered = [config.link_column, config.status_column, config.error_column, config.processed_at_column, config.source_hash_column]
     if len(values) < len(ordered):
         return False
     actual = dict(zip(ordered, values))
-    if cell_text(actual.get(config.link_column)) != expected[config.link_column]:
+    if not link_value_matches(actual.get(config.link_column), expected[config.link_column]):
         return False
     if cell_text(actual.get(config.status_column)).casefold() != "success":
         return False
@@ -811,6 +1176,12 @@ def build_config(args: argparse.Namespace) -> MonitorConfig:
         screening_enabled = normalize_bool(raw_screening, variable="FEISHU_SCREENING_ENABLED") if raw_screening is not None else False
     else:
         screening_enabled = bool(screening_flag)
+    link_only_flag = getattr(args, "link_only_writeback", None)
+    if link_only_flag is None:
+        raw_link_only = env_first("FEISHU_LINK_ONLY_WRITEBACK")
+        link_only_writeback = normalize_bool(raw_link_only, variable="FEISHU_LINK_ONLY_WRITEBACK") if raw_link_only is not None else False
+    else:
+        link_only_writeback = bool(link_only_flag)
     pdf_directory = Path(args.pdf_dir or env_first("FEISHU_PDF_DIR") or (Path.home() / "Downloads")).expanduser().resolve()
     output_directory = Path(args.output_dir or env_first("FEISHU_MONITOR_OUTPUT_DIR") or (PROJECT_ROOT / "outputs" / "feishu-resume-monitor")).expanduser().resolve()
     state_path = Path(args.state_file or env_first("FEISHU_MONITOR_STATE_FILE") or (PROJECT_ROOT / "var" / "feishu-resume-monitor" / "state.json")).expanduser().resolve()
@@ -820,8 +1191,30 @@ def build_config(args: argparse.Namespace) -> MonitorConfig:
     folder_token = args.folder_token or env_first("FEISHU_DOC_FOLDER_TOKEN")
     lock_key = hashlib.sha256((folder_token or "root").encode("utf-8")).hexdigest()[:16]
     lock_path = Path(args.lock_file or env_first("FEISHU_MONITOR_LOCK_FILE") or (PROJECT_ROOT / "var" / "feishu-resume-monitor" / f"{lock_key}.import.lock")).expanduser().resolve()
-    screening_database = Path(getattr(args, "screening_database", None) or env_first("FEISHU_SCREENING_DATABASE") or DEFAULT_SCREENING_DATABASE).expanduser().resolve()
-    screening_output_directory = Path(getattr(args, "screening_output", None) or env_first("FEISHU_SCREENING_OUTPUT_DIR") or DEFAULT_SCREENING_OUTPUT_DIRECTORY).expanduser().resolve()
+    screening_database_value = getattr(args, "screening_database", None) or env_first(
+        "FEISHU_SCREENING_DATABASE"
+    )
+    screening_output_value = getattr(args, "screening_output", None) or env_first(
+        "FEISHU_SCREENING_OUTPUT_DIR"
+    )
+    if screening_enabled and not screening_database_value:
+        raise ValueError(
+            "--screening requires --screening-database or FEISHU_SCREENING_DATABASE"
+        )
+    if screening_enabled and not screening_output_value:
+        raise ValueError(
+            "--screening requires --screening-output or FEISHU_SCREENING_OUTPUT_DIR"
+        )
+    screening_database = (
+        Path(screening_database_value).expanduser().resolve()
+        if screening_database_value
+        else None
+    )
+    screening_output_directory = (
+        Path(screening_output_value).expanduser().resolve()
+        if screening_output_value
+        else None
+    )
     screening_role = getattr(args, "screening_role", None) or env_first("FEISHU_SCREENING_ROLE") or DEFAULT_SCREENING_ROLE
     screening_model = getattr(args, "screening_model", None) or env_first("FEISHU_SCREENING_MODEL") or DEFAULT_SCREENING_MODEL
     base_token = args.base_token or env_first("FEISHU_BASE_TOKEN") or ""
@@ -839,6 +1232,7 @@ def build_config(args: argparse.Namespace) -> MonitorConfig:
         row_key_column=args.row_key_column or env_first("FEISHU_ROW_KEY_COLUMN", "ROW_KEY_COLUMN") or DEFAULT_ROW_KEY_COLUMN,
         job_prefix=args.job_prefix or env_first("FEISHU_JOB_PREFIX") or DEFAULT_JOB_PREFIX,
         link_column=args.link_column or env_first("FEISHU_LINK_COLUMN", "LINK_COLUMN") or DEFAULT_LINK_COLUMN,
+        link_only_writeback=link_only_writeback,
         status_column=args.status_column or env_first("FEISHU_STATUS_COLUMN", "STATUS_COLUMN") or DEFAULT_STATUS_COLUMN,
         error_column=args.error_column or env_first("FEISHU_ERROR_COLUMN", "ERROR_COLUMN") or DEFAULT_ERROR_COLUMN,
         processed_at_column=args.processed_at_column or env_first("FEISHU_PROCESSED_AT_COLUMN", "PROCESSED_AT_COLUMN") or DEFAULT_PROCESSED_AT_COLUMN,
@@ -872,6 +1266,13 @@ def build_config(args: argparse.Namespace) -> MonitorConfig:
 
 class FeishuResumeMonitor:
     def __init__(self, config: MonitorConfig, cli: LarkCLI | None = None):
+        if config.screening_enabled and (
+            config.screening_database is None
+            or config.screening_output_directory is None
+        ):
+            raise ValueError(
+                "screening requires a batch database and output directory"
+            )
         self.config = config
         self.cli = cli or LarkCLI(config.cli_executable)
         self._screening_queue: ScreeningQueueBridge | None = None
@@ -880,6 +1281,13 @@ class FeishuResumeMonitor:
         if not self.config.screening_enabled:
             raise ScreeningHandoffError("screening handoff is disabled")
         if self._screening_queue is None:
+            if (
+                self.config.screening_database is None
+                or self.config.screening_output_directory is None
+            ):
+                raise ScreeningHandoffError(
+                    "screening requires a batch database and output directory"
+                )
             self._screening_queue = ScreeningQueueBridge(
                 database=self.config.screening_database,
                 output_directory=self.config.screening_output_directory,
@@ -979,8 +1387,12 @@ class FeishuResumeMonitor:
         missing = [name for name in self.config.required_columns if name not in fields]
         row_key_missing = self.config.row_key_column not in fields
         type_errors = writeback_diagnostics(self.config, fields)
+        link_only_type_errors = writeback_diagnostics(
+            self.config, fields, link_only=True
+        )
         if row_key_missing:
             type_errors.append(f"missing row key column: {self.config.row_key_column}")
+            link_only_type_errors.append(f"missing row key column: {self.config.row_key_column}")
         record_path = record_snapshot_path(self.config)
         record_path.parent.mkdir(parents=True, exist_ok=True)
         record_args = self._base_args(
@@ -1022,6 +1434,9 @@ class FeishuResumeMonitor:
             if key:
                 by_key.setdefault(key, []).append(row)
         fingerprint = preflight_fingerprint(self.config, fields, records, missing, type_errors)
+        full_writeback_allowed = not missing and not type_errors and not row_key_missing and not has_more
+        link_only_writeback_allowed = not link_only_type_errors and not has_more
+        writeback_allowed = link_only_writeback_allowed if self.config.link_only_writeback else full_writeback_allowed
         report = {
             "ok": not has_more,
             "table_read": True,
@@ -1035,9 +1450,17 @@ class FeishuResumeMonitor:
             "row_key_present": not row_key_missing,
             "unique_nonempty_row_keys": len(by_key) == sum(len(values) == 1 for values in by_key.values()),
             "optional_ai_column_present": self.config.optional_ai_column in fields,
-            "writeback_allowed": not missing and not type_errors and not row_key_missing and not has_more,
-            "operation_mode": "writeback_enabled" if not missing and not type_errors and not row_key_missing and not has_more else "document_only",
+            "writeback_allowed": writeback_allowed,
+            "operation_mode": (
+                "link_only_writeback"
+                if self.config.link_only_writeback and link_only_writeback_allowed
+                else "writeback_enabled"
+                if full_writeback_allowed
+                else "document_only"
+            ),
             "writeback_diagnostics": type_errors,
+            "link_only_writeback_enabled": self.config.link_only_writeback,
+            "link_only_writeback_diagnostics": link_only_type_errors,
             "records_artifact": str(record_path),
             "fingerprint": fingerprint,
         }
@@ -1156,7 +1579,12 @@ class FeishuResumeMonitor:
             return {"status": "import_failed", "attempts": attempts, "transient_attempts": total_transient_attempts, "url": url, "ticket": ticket, "error": "document_readback_failed: " + "; ".join(issues)}
         return {"status": "success", "attempts": attempts, "transient_attempts": total_transient_attempts, "ticket": ticket, "url": url, "readback_nonempty": True, "readback_chars": len(content.strip())}
 
-    def _import_unlocked(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def _import_unlocked(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         args = [
             "drive",
             "+import",
@@ -1218,17 +1646,39 @@ class FeishuResumeMonitor:
             if polled.get("status") != "ok":
                 return {"status": "import_failed", "attempts": attempts, "transient_attempts": transient_attempts + int(polled.get("transient_attempts", 0)), "ticket": ticket, "error": polled.get("error")}
             url = str(polled["url"])
-        return self._fetch_document(
+        rich_format_applied = False
+        if rich_content_path is not None:
+            applied, error = apply_rich_document_content(self.cli, url, rich_content_path)
+            if not applied:
+                return {
+                    "status": "import_failed",
+                    "attempts": attempts,
+                    "transient_attempts": transient_attempts,
+                    "ticket": ticket,
+                    "url": url,
+                    "rich_format_applied": False,
+                    "error": "document_rich_format_failed: " + str(error),
+                }
+            rich_format_applied = True
+        result = self._fetch_document(
             url,
             attempts=attempts,
             transient_attempts=transient_attempts,
             ticket=ticket,
         )
+        if rich_content_path is not None:
+            result["rich_format_applied"] = rich_format_applied
+        return result
 
-    def import_document(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def import_document(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         try:
             with DestinationLock(self.config.lock_path):
-                return self._import_unlocked(markdown_path, display_name)
+                return self._import_unlocked(markdown_path, display_name, rich_content_path)
         except ImportLockBusy as exc:
             return {"status": "import_pending", "attempts": 0, "error": str(exc)}
 
@@ -1323,7 +1773,12 @@ class FeishuResumeMonitor:
 
     def writeback(self, preflight: PreflightContext, item: dict[str, Any], document_url: str, *, base_already_written: bool = False) -> dict[str, Any]:
         if not preflight.writeback_allowed:
-            return {"status": "blocked", "error": "required Base processing fields are absent or not writable"}
+            error = (
+                "Base link-only writeback is not allowed"
+                if self.config.link_only_writeback
+                else "required Base processing fields are absent or not writable"
+            )
+            return {"status": "blocked", "error": error}
         if base_already_written:
             return {"status": "verified", "written": False}
         processed_at = now_local()
@@ -1355,7 +1810,12 @@ class FeishuResumeMonitor:
         ignored = ignored_field_names(response.payload)
         if ignored.intersection(updates):
             return {"status": "failed", "written": False, "error": "Base update ignored configured fields"}
-        field_ids = [str(preflight.fields[name].get("id") or name) for name in (self.config.link_column, self.config.status_column, self.config.error_column, self.config.processed_at_column, self.config.source_hash_column)]
+        field_names = (
+            (self.config.link_column,)
+            if self.config.link_only_writeback
+            else (self.config.link_column, self.config.status_column, self.config.error_column, self.config.processed_at_column, self.config.source_hash_column)
+        )
+        field_ids = [str(preflight.fields[name].get("id") or name) for name in field_names]
         get_args = self._base_args(
             "+record-get",
             "--table-id",
@@ -1407,7 +1867,7 @@ class FeishuResumeMonitor:
             "input": {"pdf_directory": str(self.config.pdf_directory), "files_sorted_by": "file_name (Python Unicode lexicographic order)", "pdf_suffix_filter": ".pdf only", "job_prefix_filter": self.config.job_prefix},
             "pdf_key_rule": {"pattern": pdf_key_rule(self.config.job_prefix), "normalization": "NFKC + remove whitespace; exact match to Base row key; require exactly one record"},
             "preflight": preflight.report,
-            "screening": {"enabled": self.config.screening_enabled, "handoff": "after_nonempty_document_readback" if self.config.screening_enabled else "disabled", "role": self.config.screening_role, "model": self.config.screening_model, "database": str(self.config.screening_database), "output_directory": str(self.config.screening_output_directory)},
+            "screening": {"enabled": self.config.screening_enabled, "handoff": "after_nonempty_document_readback" if self.config.screening_enabled else "disabled", "role": self.config.screening_role, "model": self.config.screening_model, "database": str(self.config.screening_database) if self.config.screening_database else None, "output_directory": str(self.config.screening_output_directory) if self.config.screening_output_directory else None},
             "execution": {"same_folder_imports_serial": True, "base_writeback_performed": False, "next_action_executed": False, "remote_writes": 0, "document_imports": 0, "screening_handoffs": 0, "writeback_mode": "writeback_enabled" if preflight.writeback_allowed else "document_only", "writeback_block_reason": None if preflight.writeback_allowed else "configured processing columns are missing or not writable"},
             "summary": {},
             "items": [],
@@ -1631,7 +2091,22 @@ class FeishuResumeMonitor:
                 "updated_at": now_utc(),
             }
             self._save_cycle(report, state)
-            result = self.import_document(Path(item["markdown_path"]), f"{safe_name(str(item['candidate_name']))}-简历")
+            rich_content_path = (
+                Path(item["rich_content_path"])
+                if item.get("rich_content_path")
+                else None
+            )
+            if rich_content_path is None:
+                result = self.import_document(
+                    Path(item["markdown_path"]),
+                    f"{safe_name(str(item['candidate_name']))}-简历",
+                )
+            else:
+                result = self.import_document(
+                    Path(item["markdown_path"]),
+                    f"{safe_name(str(item['candidate_name']))}-简历",
+                    rich_content_path,
+                )
             state_entry = self._record_import_result(
                 preflight,
                 item,
@@ -1746,6 +2221,12 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cli")
     parser.add_argument("--row-key-column")
     parser.add_argument("--link-column")
+    parser.add_argument(
+        "--link-only-writeback",
+        action="store_true",
+        default=None,
+        help="允许在仅有行键和在线链接字段的 Base 中只写回在线链接",
+    )
     parser.add_argument("--status-column")
     parser.add_argument("--error-column")
     parser.add_argument("--processed-at-column")
@@ -1756,8 +2237,14 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-poll-seconds", type=float, default=2.0)
     parser.add_argument("--max-files", type=int)
     parser.add_argument("--retry-failed", action="store_true")
-    parser.add_argument("--screening-database")
-    parser.add_argument("--screening-output")
+    parser.add_argument(
+        "--screening-database",
+        help="required with --screening; use the current batch database",
+    )
+    parser.add_argument(
+        "--screening-output",
+        help="required with --screening; use the current batch output directory",
+    )
     parser.add_argument("--screening-role", choices=sorted(ROLE_VERSIONS))
     parser.add_argument("--screening-model")
     parser.add_argument("--seed-report", type=Path, help="seed local idempotency state from an existing successful batch report")

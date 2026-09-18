@@ -9,6 +9,13 @@ from pathlib import Path
 # not keyword matches in arbitrary positions: a resume whose name merely
 # contains a role word remains unlabeled and is not auto-routed.
 ROLE_HINTS = (
+    ("业务系统运维工程师", "business-system-operations-engineer"),
+    ("业务系统运维", "business-system-operations-engineer"),
+    ("应用支持工程师", "business-system-operations-engineer"),
+    ("运维开发工程师", "operations-devops-engineer"),
+    ("运维开发", "operations-devops-engineer"),
+    ("DevOps Engineer", "operations-devops-engineer"),
+    ("DevOps", "operations-devops-engineer"),
     ("全栈开发实习生", "fullstack-development-intern"),
     ("全栈开发实习", "fullstack-development-intern"),
     ("全栈实习生", "fullstack-development-intern"),

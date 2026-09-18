@@ -34,6 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from resume_screening.cleaning import ResumeQualityError
 from resume_screening.feishu_monitor import (
+    apply_rich_document_content,
     CliResponse,
     LarkCLI,
     MonitorError,
@@ -60,7 +61,7 @@ from resume_screening.queue import TaskStore
 from resume_screening.versions import ROLE_VERSIONS, contract_matches
 
 
-SCRIPT_VERSION = "feishu-online-resume-publisher-v3"
+SCRIPT_VERSION = "feishu-online-resume-publisher-v4"
 STATE_VERSION = 1
 DEFAULT_JOB_PREFIX = "全栈工程师_深圳 15-25K"
 DEFAULT_SOURCE_DIRECTORY = Path.home() / "Downloads"
@@ -69,8 +70,6 @@ DEFAULT_STATE_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "
 DEFAULT_REPORT_PATH = DEFAULT_OUTPUT_DIRECTORY / "online-publish-report.json"
 DEFAULT_HISTORY_PATH = PROJECT_ROOT / "var" / "feishu-online-resume-publisher" / "history.jsonl"
 DEFAULT_INDEX_NAME = "resume-index.md"
-DEFAULT_SCREENING_DATABASE = PROJECT_ROOT / "var" / "screening-v8.sqlite3"
-DEFAULT_SCREENING_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs"
 DEFAULT_SCREENING_MIN_SCORE = 70
 SCREENING_INDEX_MODES = ("shortlist", "all-scored")
 DEFAULT_SCREENING_INDEX_MODE = "shortlist"
@@ -94,8 +93,8 @@ class PublisherConfig:
     task_timeout_seconds: int = 180
     task_poll_seconds: float = 2.0
     screening_enabled: bool = False
-    screening_database: Path = DEFAULT_SCREENING_DATABASE
-    screening_output_directory: Path = DEFAULT_SCREENING_OUTPUT_DIRECTORY
+    screening_database: Path | None = None
+    screening_output_directory: Path | None = None
     screening_role: str = DEFAULT_SCREENING_ROLE
     screening_model: str = DEFAULT_SCREENING_MODEL
     screening_min_score: int = DEFAULT_SCREENING_MIN_SCORE
@@ -208,8 +207,14 @@ def _config_fingerprint(config: PublisherConfig) -> str:
         "today_only": config.today_only,
         "index_path": str(config.index_path),
         "screening_enabled": config.screening_enabled,
-        "screening_database": str(config.screening_database),
-        "screening_output_directory": str(config.screening_output_directory),
+        "screening_database": (
+            str(config.screening_database) if config.screening_database else None
+        ),
+        "screening_output_directory": (
+            str(config.screening_output_directory)
+            if config.screening_output_directory
+            else None
+        ),
         "screening_role": config.screening_role,
         "screening_model": config.screening_model,
         "screening_min_score": config.screening_min_score,
@@ -281,7 +286,37 @@ class OnlineFeishuImporter:
             "readback_chars": len(content.strip()),
         }
 
-    def _poll_ticket(self, ticket: str) -> dict[str, Any]:
+    def _finalize_document(
+        self,
+        url: str,
+        ticket: str | None = None,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
+        if rich_content_path is not None:
+            applied, error = apply_rich_document_content(
+                self.cli,
+                url,
+                rich_content_path,
+            )
+            if not applied:
+                return {
+                    "status": "import_failed",
+                    "doc_url": url,
+                    "ticket": ticket,
+                    "rich_format_applied": False,
+                    "error": "document_rich_format_failed: " + str(error),
+                }
+        result = self._fetch_document(url)
+        result["ticket"] = ticket
+        if rich_content_path is not None:
+            result["rich_format_applied"] = True
+        return result
+
+    def _poll_ticket(
+        self,
+        ticket: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + self.config.task_timeout_seconds
         while time.monotonic() < deadline:
             response = self.cli.run(
@@ -301,7 +336,7 @@ class OnlineFeishuImporter:
             )
             url = find_url(response.payload)
             if response.ok and url:
-                return self._fetch_document(url)
+                return self._finalize_document(url, ticket, rich_content_path)
             if response.ok:
                 state = find_string(response.payload, {"status", "state"})
                 if state and state.casefold() in {"failed", "error", "canceled", "cancelled"}:
@@ -324,7 +359,12 @@ class OnlineFeishuImporter:
             "error": "import task did not return a document URL before timeout; confirm the target folder manually",
         }
 
-    def import_and_readback(self, markdown_path: Path, display_name: str) -> dict[str, Any]:
+    def import_and_readback(
+        self,
+        markdown_path: Path,
+        display_name: str,
+        rich_content_path: Path | None = None,
+    ) -> dict[str, Any]:
         args = [
             "drive",
             "+import",
@@ -348,11 +388,9 @@ class OnlineFeishuImporter:
         url = find_url(response.payload)
         ticket = find_ticket(response.payload)
         if url:
-            result = self._fetch_document(url)
-            result["ticket"] = ticket
-            return result
+            return self._finalize_document(url, ticket, rich_content_path)
         if ticket:
-            return self._poll_ticket(ticket)
+            return self._poll_ticket(ticket, rich_content_path)
         if not response.ok and is_transient(response.diagnostic):
             return {
                 "status": "import_pending",
@@ -379,6 +417,8 @@ def _entry_for_item(item: dict[str, Any], *, status: str, result: dict[str, Any]
         "candidate_id": item.get("candidate_id"),
         "markdown_path": item.get("markdown_path"),
         "cleaned_markdown_path": item.get("cleaned_markdown_path"),
+        "rich_content_path": item.get("rich_content_path"),
+        "rich_format_applied": result.get("rich_format_applied", item.get("rich_format_applied")),
         "doc_url": result.get("doc_url") or item.get("doc_url"),
         "ticket": result.get("ticket") or item.get("ticket"),
         "readback_nonempty": result.get("readback_nonempty", item.get("readback_nonempty")),
@@ -400,6 +440,8 @@ def _item_from_entry(item: dict[str, Any], entry: dict[str, Any], reason: str) -
                 "candidate_id",
                 "markdown_path",
                 "cleaned_markdown_path",
+                "rich_content_path",
+                "rich_format_applied",
                 "doc_url",
                 "ticket",
                 "readback_nonempty",
@@ -452,7 +494,11 @@ def _screened_index_rows(
     candidate ID or treat a queued/manual-review task as a passing result.
     """
 
-    if not published_items or not config.screening_database.is_file():
+    if (
+        not published_items
+        or config.screening_database is None
+        or not config.screening_database.is_file()
+    ):
         return [], None
     try:
         results = TaskStore(config.screening_database).successful_results()
@@ -510,6 +556,8 @@ def _base_item(path: Path, candidate_name: str) -> dict[str, Any]:
         "status": "pending",
         "markdown_path": None,
         "cleaned_markdown_path": None,
+        "rich_content_path": None,
+        "rich_format_applied": None,
         "doc_url": None,
         "ticket": None,
         "readback_nonempty": None,
@@ -533,8 +581,16 @@ def _report_shell(config: PublisherConfig, *, started_at: str) -> dict[str, Any]
         "job_prefix": config.job_prefix,
         "screening": {
             "enabled": config.screening_enabled,
-            "database": str(config.screening_database),
-            "output_directory": str(config.screening_output_directory),
+            "database": (
+                str(config.screening_database)
+                if config.screening_database
+                else None
+            ),
+            "output_directory": (
+                str(config.screening_output_directory)
+                if config.screening_output_directory
+                else None
+            ),
             "role": config.screening_role,
             "model": config.screening_model,
             "min_score": config.screening_min_score,
@@ -566,6 +622,12 @@ def _screening_handoff(
 ) -> tuple[dict[str, Any], ScreeningQueueBridge | None]:
     if not config.screening_enabled:
         return {"status": "disabled", "error": "screening handoff is disabled"}, bridge
+    if config.screening_database is None or config.screening_output_directory is None:
+        return {
+            "status": "failed",
+            "error_code": "SCREENING_CONFIGURATION_MISSING",
+            "error": "screening requires a batch database and output directory",
+        }, bridge
     if config.dry_run:
         return {
             "status": "blocked",
@@ -617,6 +679,13 @@ def _save_report_and_history(config: PublisherConfig, report: dict[str, Any]) ->
 
 
 def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = None) -> dict[str, Any]:
+    if config.screening_enabled and (
+        config.screening_database is None
+        or config.screening_output_directory is None
+    ):
+        raise ValueError(
+            "screening requires a batch database and output directory"
+        )
     started_at = now_utc()
     state = _normalise_state(_load_json(config.state_path, _new_state()))
     report = _report_shell(config, started_at=started_at)
@@ -733,6 +802,8 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
             )
             item["markdown_path"] = str(Path(prepared["markdown_path"]).resolve())
             item["cleaned_markdown_path"] = str(Path(prepared["cleaned_markdown_path"]).resolve())
+            if prepared.get("rich_content_path"):
+                item["rich_content_path"] = str(Path(prepared["rich_content_path"]).resolve())
             item["markdown_chars"] = prepared.get("markdown_chars")
             item["page_count"] = prepared.get("page_count")
             item["used_ocr"] = prepared.get("used_ocr")
@@ -758,11 +829,18 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
             )
             _write_json(config.state_path, state)
             assert importer is not None
-            result = importer.import_and_readback(
-                Path(item["markdown_path"]),
-                f"{candidate_name}-简历",
-            )
-            item.update({key: result.get(key) for key in ("doc_url", "ticket", "readback_nonempty", "readback_chars", "import_outcome_uncertain", "error")})
+            if item.get("rich_content_path"):
+                result = importer.import_and_readback(
+                    Path(item["markdown_path"]),
+                    f"{candidate_name}-简历",
+                    Path(item["rich_content_path"]),
+                )
+            else:
+                result = importer.import_and_readback(
+                    Path(item["markdown_path"]),
+                    f"{candidate_name}-简历",
+                )
+            item.update({key: result.get(key) for key in ("doc_url", "ticket", "readback_nonempty", "readback_chars", "import_outcome_uncertain", "rich_format_applied", "error")})
             item["status"] = str(result.get("status") or "import_failed")
             state["entries"][source_hash] = _entry_for_item(item, status=item["status"], result=result)
             if item["status"] == "success" and item.get("doc_url") and item.get("readback_nonempty"):
@@ -842,8 +920,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval-seconds", type=int, default=300)
     parser.add_argument("--task-timeout-seconds", type=int, default=180)
     parser.add_argument("--task-poll-seconds", type=float, default=2.0)
-    parser.add_argument("--screening-database", type=Path, default=None)
-    parser.add_argument("--screening-output", type=Path, default=None)
+    parser.add_argument(
+        "--screening-database",
+        type=Path,
+        default=None,
+        help="required with --screening; use the current batch database",
+    )
+    parser.add_argument(
+        "--screening-output",
+        type=Path,
+        default=None,
+        help="required with --screening; use the current batch output directory",
+    )
     parser.add_argument("--screening-role", choices=sorted(ROLE_VERSIONS), default=None)
     parser.add_argument("--screening-model", default=None)
     parser.add_argument(
@@ -868,19 +956,29 @@ def _config_from_args(args: argparse.Namespace) -> PublisherConfig:
     output = _resolved(args.output_dir)
     index = _resolved(args.index_file) if args.index_file is not None else output / DEFAULT_INDEX_NAME
     folder_token = args.folder_token or os.environ.get("FEISHU_DOC_FOLDER_TOKEN", "").strip() or None
-    screening_database = _resolved(
-        Path(
-            args.screening_database
-            or os.environ.get("FEISHU_SCREENING_DATABASE", "").strip()
-            or DEFAULT_SCREENING_DATABASE
+    screening_database_value = args.screening_database or os.environ.get(
+        "FEISHU_SCREENING_DATABASE", ""
+    ).strip()
+    screening_output_value = args.screening_output or os.environ.get(
+        "FEISHU_SCREENING_OUTPUT_DIR", ""
+    ).strip()
+    if args.screening_enabled and not screening_database_value:
+        raise ValueError(
+            "--screening requires --screening-database or FEISHU_SCREENING_DATABASE"
         )
+    if args.screening_enabled and not screening_output_value:
+        raise ValueError(
+            "--screening requires --screening-output or FEISHU_SCREENING_OUTPUT_DIR"
+        )
+    screening_database = (
+        _resolved(Path(screening_database_value))
+        if screening_database_value
+        else None
     )
-    screening_output_directory = _resolved(
-        Path(
-            args.screening_output
-            or os.environ.get("FEISHU_SCREENING_OUTPUT_DIR", "").strip()
-            or DEFAULT_SCREENING_OUTPUT_DIRECTORY
-        )
+    screening_output_directory = (
+        _resolved(Path(screening_output_value))
+        if screening_output_value
+        else None
     )
     screening_role = (
         args.screening_role

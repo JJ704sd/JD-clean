@@ -69,6 +69,10 @@ class MiniMaxClientTests(unittest.TestCase):
             request.full_url,
             "https://api.minimaxi.com/v1/text/chatcompletion_v2",
         )
+        self.assertEqual(
+            json.loads(request.data)["thinking"],
+            {"type": "disabled"},
+        )
 
     def test_environment_base_builds_domestic_text_endpoint(self):
         response = FakeHttpResponse(

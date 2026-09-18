@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import unittest
@@ -27,7 +28,10 @@ def documented_senior_record() -> dict:
         r"```json\s*(.*?)\s*```", contract.read_text(encoding="utf-8"), re.DOTALL
     )
     assert match
-    return json.loads(match.group(1))
+    record = json.loads(match.group(1))
+    for item in record["evidence"]:
+        item["confidence"] = "high"
+    return record
 
 
 def assemble(
@@ -36,13 +40,14 @@ def assemble(
     prompt_version: str | None = None,
     resume_text: str = "",
     rubric_version: str = "senior-fullstack-2026-09-01-v6",
+    jd_version: str = "senior-fullstack-2026-08-14-v1",
 ) -> dict:
     return assemble_senior_record(
         payload,
         screening_record_id="sr-test",
         candidate_id="candidate-test",
         candidate_name=None,
-        jd_version="senior-fullstack-2026-08-14-v1",
+        jd_version=jd_version,
         rubric_version=rubric_version,
         prompt_version=prompt_version,
         resume_text=resume_text,
@@ -50,6 +55,648 @@ def assemble(
 
 
 class SeniorRecordAssemblyTests(unittest.TestCase):
+    def test_v13_out_of_range_experience_reduces_score_without_blocking_advance(self):
+        source = documented_senior_record()
+        experience = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-EXP-01"
+        )
+        experience.update(
+            state="directly_not_met",
+            strength="E1",
+            excerpt="8 年应用研发经验",
+            location="个人概况",
+            rationale="明确超过 3 至 7 年优选范围",
+            confidence="high",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v13",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(
+            record["priority_profile"]["experience_fit_signal"],
+            "outside_preferred_range",
+        )
+        self.assertEqual(
+            set(record["priority_profile"]["qualification_dimensions"]),
+            {"education"},
+        )
+        self.assertEqual(score_record(record).components["SEN-EXP-01"], 0)
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v13_experience_has_twenty_percent_score_weight(self):
+        source = documented_senior_record()
+        experience = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-EXP-01"
+        )
+        experience["strength"] = "E3"
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v13",
+        )
+
+        self.assertEqual(score_record(record).components["SEN-EXP-01"], 20)
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v14_first_associate_then_later_bachelor_fails_first_education_gate(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：本科（专升本）",
+            location="教育经历",
+            rationale="最高学历达到本科，但首段教育经历需单独核验",
+            confidence="high",
+            first_education={
+                "level": "below_bachelor",
+                "excerpt": "2012–2015 大专，2016–2018 专升本本科",
+                "location": "教育经历",
+                "confidence": "high",
+            },
+        )
+        record = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+
+        dimensions = record["priority_profile"]["qualification_dimensions"]
+        self.assertEqual(dimensions, {"education": "met", "first_education": "not_met"})
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 1)
+        self.assertEqual(record["model_recommendation"], "do_not_advance_pending_human")
+        self.assertIn("第一学历未达到本科及以上", record["recommendation_rationale"])
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v14_first_bachelor_passes_and_highest_degree_alone_requires_second_review(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：硕士",
+            location="教育经历",
+            rationale="简历明确记载最高学历",
+            confidence="high",
+        )
+        education["first_education"] = {
+            "level": "bachelor_or_above",
+            "excerpt": "2012–2016 本科",
+            "location": "教育经历",
+            "confidence": "high",
+        }
+        passed = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+        self.assertEqual(
+            passed["priority_profile"]["qualification_dimensions"],
+            {"education": "met", "first_education": "met"},
+        )
+        self.assertEqual(passed["model_recommendation"], "advance_pending_human")
+        self.assertEqual(validate_record(ROOT, passed["role"], passed), [])
+
+        education["first_education"] = {
+            "level": "unclear",
+            "excerpt": None,
+            "location": None,
+            "confidence": "low",
+        }
+        uncertain = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+        self.assertEqual(
+            uncertain["priority_profile"]["qualification_dimensions"],
+            {"education": "met", "first_education": "unclear"},
+        )
+        self.assertEqual(uncertain["model_recommendation"], "second_review")
+        self.assertIn("U06_BOUNDARY_CASE", {item["code"] for item in uncertain["uncertainties"]})
+        self.assertEqual(validate_record(ROOT, uncertain["role"], uncertain), [])
+
+    def test_v14_uncertain_below_bachelor_excerpt_is_not_automatically_rejected(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.update(
+            state="supported",
+            strength="E1",
+            excerpt="最高学历：本科",
+            location="教育经历",
+            rationale="简历记载最高学历为本科",
+            confidence="high",
+            first_education={
+                "level": "below_bachelor",
+                "excerpt": "曾就读大专，日期无法辨识",
+                "location": "教育经历",
+                "confidence": "medium",
+            },
+        )
+        record = assemble(
+            {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+            rubric_version="senior-fullstack-2026-09-14-v14",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["first_education"],
+            "unclear",
+        )
+        self.assertEqual(record["model_recommendation"], "second_review")
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v14_missing_first_education_object_is_invalid_model_output(self):
+        source = documented_senior_record()
+        education = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-ADM-01"
+        )
+        education.pop("first_education", None)
+
+        with self.assertRaisesRegex(ValueError, "first_education must be an object"):
+            assemble(
+                {"evidence": source["evidence"], "uncertainties": [], "interview_probes": source["interview_probes"]},
+                rubric_version="senior-fullstack-2026-09-14-v14",
+            )
+
+    def test_v12_out_of_range_experience_is_a_hard_failure(self):
+        source = documented_senior_record()
+        experience = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-EXP-01"
+        )
+        experience.update(
+            state="directly_not_met",
+            strength="E1",
+            excerpt="8 年应用研发经验",
+            location="个人概况",
+            rationale="明确超过 3 至 7 年范围",
+            confidence="high",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            jd_version="senior-fullstack-2026-08-14-v1",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["experience_range"],
+            "not_met",
+        )
+        self.assertEqual(
+            record["model_recommendation"], "do_not_advance_pending_human"
+        )
+
+    def test_v12_explicit_language_resistance_is_a_hard_failure(self):
+        source = documented_senior_record()
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            resume_text="只接受 Java 岗位，不考虑其他语言，也不接受转语言。",
+        )
+
+        self.assertEqual(record["priority_profile"]["language_acceptance"], "resistant")
+        self.assertEqual(
+            record["model_recommendation"], "do_not_advance_pending_human"
+        )
+
+    def test_v12_explicit_language_hesitation_is_a_hard_failure(self):
+        source = documented_senior_record()
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            resume_text="对是否转 Go 语言比较犹豫，希望继续确认后再决定。",
+        )
+
+        self.assertEqual(record["priority_profile"]["language_acceptance"], "resistant")
+        self.assertEqual(
+            record["model_recommendation"], "do_not_advance_pending_human"
+        )
+
+    def test_v12_explicit_outsourcing_background_is_a_hard_failure(self):
+        source = documented_senior_record()
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            resume_text="近三年以人力外包形式外派驻场开发。",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["employment_model"], "outsourcing_evidenced"
+        )
+        self.assertEqual(
+            record["model_recommendation"], "do_not_advance_pending_human"
+        )
+
+    def test_v12_language_and_outsourcing_negations_do_not_trigger_exclusion(self):
+        source = documented_senior_record()
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            resume_text="本人并不抵触切换技术栈，也没有人力外包或外派驻场经历。",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["language_acceptance"],
+            "no_resistance_evidenced",
+        )
+        self.assertEqual(
+            record["priority_profile"]["employment_model"],
+            "no_outsourcing_evidenced",
+        )
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+
+    def test_v12_logistics_is_high_impact_but_not_mandatory(self):
+        source = documented_senior_record()
+        domain = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-DOMAIN-01"
+        )
+        domain.update(
+            state="not_evidenced",
+            strength="E0",
+            excerpt=None,
+            location=None,
+            rationale="简历未提供物流项目证据",
+            confidence="high",
+        )
+
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            jd_version="senior-fullstack-2026-08-14-v1",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(
+            record["priority_profile"]["logistics_experience"], "not_evidenced"
+        )
+        self.assertNotIn(
+            "logistics",
+            record["priority_profile"]["qualification_dimensions"],
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v11_all_core_combinations_ignore_language_signal_for_threshold(self):
+        dimension_criteria = {
+            "education": "SEN-ADM-01",
+            "logistics": "SEN-DOMAIN-01",
+            "valuable_project": "SEN-LEVEL-01",
+        }
+        for core_values in itertools.product((False, True), repeat=3):
+            for language_state in ("supported", "not_evidenced", "unclear"):
+                expected = dict(zip(dimension_criteria, core_values, strict=True))
+                with self.subTest(**expected, language_state=language_state):
+                    source = documented_senior_record()
+                    for name, criterion_id in dimension_criteria.items():
+                        if expected[name]:
+                            continue
+                        item = next(
+                            item
+                            for item in source["evidence"]
+                            if item["criterion_id"] == criterion_id
+                        )
+                        item.update(
+                            state="not_evidenced",
+                            strength="E0",
+                            excerpt=None,
+                            location=None,
+                            rationale="简历未提供充分证据",
+                            confidence="high",
+                        )
+                    backend = next(
+                        item
+                        for item in source["evidence"]
+                        if item["criterion_id"] == "SEN-BE-01"
+                    )
+                    if language_state == "not_evidenced":
+                        backend.update(
+                            state="not_evidenced",
+                            strength="E0",
+                            excerpt=None,
+                            location=None,
+                            rationale="简历未提供语言转换证据",
+                            confidence="high",
+                        )
+                    elif language_state == "unclear":
+                        backend["confidence"] = "low"
+                    record = assemble(
+                        {
+                            "evidence": source["evidence"],
+                            "uncertainties": [],
+                            "interview_probes": source["interview_probes"],
+                        },
+                        rubric_version="senior-fullstack-2026-09-04-v11",
+                    )
+                    unmet = sum(not value for value in core_values)
+                    self.assertEqual(
+                        record["priority_profile"]["unmet_requirement_count"], unmet
+                    )
+                    self.assertEqual(
+                        record["model_recommendation"],
+                        "do_not_advance_pending_human"
+                        if unmet >= 2
+                        else "advance_pending_human",
+                    )
+                    self.assertEqual(
+                        record["priority_profile"]["language_learning_signal"],
+                        language_state,
+                    )
+                    self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v11_missing_language_transition_is_non_blocking(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            excerpt="负责 Java 订单服务接口开发与生产上线",
+            rationale="有后端项目交付，但简历未体现转语言或转技术栈过程",
+            confidence="high",
+        )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v11",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 0)
+        self.assertEqual(
+            set(record["priority_profile"]["qualification_dimensions"]),
+            {"education", "logistics", "valuable_project"},
+        )
+        self.assertEqual(
+            record["priority_profile"]["language_learning_signal"], "not_evidenced"
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v11_unclear_language_evidence_does_not_force_second_review(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend["confidence"] = "low"
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v11",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(record["priority_profile"]["language_learning_signal"], "unclear")
+        self.assertFalse(record["human_review"]["level_2_required"])
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v10_all_four_dimension_combinations_follow_two_unmet_threshold(self):
+        dimension_criteria = {
+            "education": "SEN-ADM-01",
+            "logistics": "SEN-DOMAIN-01",
+            "valuable_project": "SEN-LEVEL-01",
+        }
+        for values in itertools.product((False, True), repeat=4):
+            expected = dict(
+                zip(
+                    ("education", "logistics", "valuable_project", "language_learning"),
+                    values,
+                    strict=True,
+                )
+            )
+            with self.subTest(**expected):
+                source = documented_senior_record()
+                for name, criterion_id in dimension_criteria.items():
+                    if expected[name]:
+                        continue
+                    item = next(
+                        item
+                        for item in source["evidence"]
+                        if item["criterion_id"] == criterion_id
+                    )
+                    item.update(
+                        state="not_evidenced",
+                        strength="E0",
+                        excerpt=None,
+                        location=None,
+                        rationale="简历未提供充分证据",
+                        confidence="high",
+                    )
+                if not expected["language_learning"]:
+                    backend = next(
+                        item
+                        for item in source["evidence"]
+                        if item["criterion_id"] == "SEN-BE-01"
+                    )
+                    backend.update(
+                        excerpt="负责 Java 订单服务接口开发",
+                        rationale="有后端项目，但未提供转语言学习交付证据",
+                        confidence="high",
+                    )
+                record = assemble(
+                    {
+                        "evidence": source["evidence"],
+                        "uncertainties": [],
+                        "interview_probes": source["interview_probes"],
+                    },
+                    rubric_version="senior-fullstack-2026-09-04-v10",
+                )
+                unmet = sum(not value for value in values)
+                self.assertEqual(
+                    record["priority_profile"]["unmet_requirement_count"], unmet
+                )
+                self.assertEqual(
+                    record["model_recommendation"],
+                    "do_not_advance_pending_human"
+                    if unmet >= 2
+                    else "advance_pending_human",
+                )
+                self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v10_education_and_valuable_project_allow_advance_without_logistics(self):
+        source = documented_senior_record()
+        domain = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-DOMAIN-01"
+        )
+        domain.update(
+            state="not_evidenced",
+            strength="E0",
+            excerpt=None,
+            location=None,
+            rationale="简历未提供物流项目证据",
+            confidence="high",
+        )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v10",
+        )
+
+        self.assertEqual(record["model_recommendation"], "advance_pending_human")
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 1)
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["logistics"],
+            "not_met",
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v10_two_unmet_dimensions_trigger_non_advance(self):
+        source = documented_senior_record()
+        for criterion_id in ("SEN-DOMAIN-01", "SEN-LEVEL-01"):
+            item = next(
+                item for item in source["evidence"] if item["criterion_id"] == criterion_id
+            )
+            item.update(
+                state="not_evidenced",
+                strength="E0",
+                excerpt=None,
+                location=None,
+                rationale="简历未提供充分项目证据",
+                confidence="high",
+            )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v10",
+        )
+
+        self.assertEqual(
+            record["model_recommendation"], "do_not_advance_pending_human"
+        )
+        self.assertEqual(record["priority_profile"]["unmet_requirement_count"], 2)
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v10_non_go_transfer_and_learning_delivery_satisfies_language(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            excerpt="从 Java 迁移到 Node.js，负责订单服务并完成生产上线",
+            rationale="有转语言学习过程和真实项目交付",
+            confidence="high",
+        )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v10",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["target_stack"],
+            "language_transfer_supported",
+        )
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["language_learning"],
+            "met",
+        )
+        self.assertEqual(validate_record(ROOT, record["role"], record), [])
+
+    def test_v10_learning_claim_without_transition_delivery_does_not_satisfy_language(self):
+        source = documented_senior_record()
+        backend = next(
+            item for item in source["evidence"] if item["criterion_id"] == "SEN-BE-01"
+        )
+        backend.update(
+            excerpt="负责 Java 订单服务接口开发",
+            rationale="自学 Go，学习能力强",
+            confidence="high",
+        )
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            rubric_version="senior-fullstack-2026-09-04-v10",
+        )
+
+        self.assertEqual(
+            record["priority_profile"]["target_stack"],
+            "language_learning_not_evidenced",
+        )
+        self.assertEqual(
+            record["priority_profile"]["qualification_dimensions"]["language_learning"],
+            "not_met",
+        )
+
+    def test_v10_valuable_project_requires_more_than_context_and_participation(self):
+        source = documented_senior_record()
+        for item in source["evidence"]:
+            item.pop("strength", None)
+            item["evidence_factors"] = {
+                "project_context": "生产项目" if item["excerpt"] else None,
+                "personal_action": "候选人负责实现" if item["excerpt"] else None,
+                "method_or_tradeoff": None,
+                "result_scope": None,
+                "verifiable_impact": None,
+            }
+        record = assemble(
+            {
+                "evidence": source["evidence"],
+                "uncertainties": [],
+                "interview_probes": source["interview_probes"],
+            },
+            prompt_version="resume-screening-prompt-2026-09-04-v5",
+            rubric_version="senior-fullstack-2026-09-04-v10",
+        )
+
+        valuable = next(
+            item for item in record["evidence"] if item["criterion_id"] == "SEN-LEVEL-01"
+        )
+        self.assertEqual(valuable["state"], "not_evidenced")
+        self.assertEqual(valuable["strength"], "E1")
+
     def test_python_derives_advance_when_all_required_evidence_meets_thresholds(self):
         source = documented_senior_record()
         architecture = next(

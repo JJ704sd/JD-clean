@@ -50,6 +50,15 @@ class DeterministicScoringTests(unittest.TestCase):
         self.assertEqual(without_logistics.score, 85)
         self.assertEqual(without_logistics.grade, "A")
 
+    def test_v14_keeps_the_approved_v13_weight_matrix(self):
+        record = senior_record()
+        record["rubric_version"] = "senior-fullstack-2026-09-14-v14"
+        result = score_record(record)
+
+        self.assertEqual(result.score, 100)
+        self.assertEqual(result.components["SEN-EXP-01"], 20)
+        self.assertEqual(result.components["SEN-ADM-01"], 2)
+
     def test_evidence_grade_is_independent_from_review_status(self):
         second_review = senior_record(recommendation="second_review")
         reviewed = score_record(second_review)

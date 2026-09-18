@@ -10,17 +10,67 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PromptContractTests(unittest.TestCase):
-    def test_senior_prompt_v4_requests_facts_without_model_strength(self):
+    def test_senior_v13_prompt_makes_experience_weighted_not_blocking(self):
         prompt = build_system_prompt(
             ROOT,
             role="senior-fullstack-engineer",
             candidate_id="candidate-test",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-03-v9",
+            rubric_version="senior-fullstack-2026-09-11-v13",
             prompt_version=PROMPT_VERSION,
         )
 
-        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-01-v4")
+        self.assertIn("评分权重由 10% 提高到 20%", prompt)
+        self.assertIn("不能单独生成暂不推进或二审", prompt)
+        self.assertIn("高级全栈 v13 校准记录", prompt)
+
+    def test_senior_v14_prompt_extracts_first_education_as_separate_evidence(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-14-v14",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn("全栈工程师 v14 校准记录", prompt)
+        self.assertIn("SEN-ADM-01 还必须包含 first_education 对象", prompt)
+        self.assertIn("below_bachelor", prompt)
+        self.assertIn("不得从最高学历推断第一学历", prompt)
+        self.assertIn("明确大专后升本仍为 below_bachelor", prompt)
+        self.assertIn("在读、肄业、未取得毕业资格不算已取得学历", prompt)
+        self.assertIn("不要输出解释性前后缀", prompt)
+
+    def test_senior_v12_prompt_contains_latest_hard_gates_and_bonus_signals(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-11-v12",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn("3 至 7 年", prompt)
+        self.assertIn("语言选择", prompt)
+        self.assertIn("外派驻场", prompt)
+        self.assertIn("独立承担项目", prompt)
+        self.assertIn("AI 深度使用", prompt)
+        self.assertIn("物流经验是高影响排序信号但不是硬门槛", prompt)
+        self.assertIn("高级全栈 v12 校准记录", prompt)
+
+    def test_senior_prompt_v6_requests_facts_without_model_strength(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-04-v11",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertEqual(PROMPT_VERSION, "resume-screening-prompt-2026-09-04-v6")
         self.assertIn("<evidence-extraction-contract>", prompt)
         self.assertIn(
             "顶层字段只能是 evidence、uncertainties、interview_probes", prompt
@@ -29,8 +79,28 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("不得输出 strength", prompt)
         self.assertIn("evidence_factors", prompt)
         self.assertIn("五项事实全部具备才可为 E3", prompt)
-        self.assertIn("logistics_flexible_backend", prompt)
-        self.assertIn("非 Go 后端", prompt)
+        self.assertIn("unmet_requirement_count", prompt)
+        self.assertIn("业务量、使用量", prompt)
+        self.assertIn("WMS", prompt)
+        self.assertIn("仅用于非阻断参考", prompt)
+        self.assertIn("高级全栈 v11 校准记录", prompt)
+        self.assertNotIn("v10 用四项累计规则", prompt)
+
+    def test_senior_prompt_requires_complete_uncertainty_fields(self):
+        prompt = build_system_prompt(
+            ROOT,
+            role="senior-fullstack-engineer",
+            candidate_id="candidate-test",
+            jd_version="senior-fullstack-2026-08-14-v1",
+            rubric_version="senior-fullstack-2026-09-04-v11",
+            prompt_version=PROMPT_VERSION,
+        )
+
+        self.assertIn(
+            "每项必须包含 code、description、decision_impact、required_human_action",
+            prompt,
+        )
+        self.assertIn("四个字段均为非空文本", prompt)
 
     def test_ai_product_manager_prompt_v3_requests_only_evidence_payload_fields(self):
         prompt = build_system_prompt(

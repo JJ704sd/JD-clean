@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "screening_record_id": "sr-bso-example",
+  "candidate_id": "candidate-bso-example",
+  "candidate_name": "示例候选人",
+  "role": "business-system-operations-engineer",
+  "screening_basis": "provisional_baseline",
+  "jd_hard_gates_approved": false,
+  "jd_version": "business-system-operations-engineer-2026-09-18-draft-v1",
+  "rubric_version": "business-system-operations-rubric-2026-09-18-v1",
+  "screening_status": "non_final",
+  "recommendation": "second_review",
+  "summary": {
+    "conclusion_label": "建议二次复核",
+    "one_line_conclusion": "有业务系统排障、问题转交和用户确认的示例证据，但岗位画像仍为草案，需人工核实个人责任和闭环结果。",
+    "top_strengths": [
+      {"criterion_id": "BSO-TROUBLE-01", "finding": "能定位业务流程与权限问题并指导用户处理。"},
+      {"criterion_id": "BSO-ESCALATE-01", "finding": "能补充复现信息后转交研发并跟进。"},
+      {"criterion_id": "BSO-TRACK-01", "finding": "能记录状态并以用户确认作为关闭条件。"}
+    ],
+    "key_gaps": [
+      {"criterion_id": "BSO-MAINT-01", "gap_type": "evidence_gap", "finding": "未提供账号、权限和基础数据维护的审批留痕证据。"},
+      {"criterion_id": "BSO-SEC-01", "gap_type": "evidence_gap", "finding": "未提供权限最小化、业务数据保护或变更审计的具体案例。"},
+      {"criterion_id": "BSO-IMPROVE-01", "gap_type": "evidence_gap", "finding": "未提供高频问题分析或上线后体验改进的完整结果。"}
+    ],
+    "human_review_requirement": "岗位画像仍为 provisional_baseline，需校准后完成一审和二审。",
+    "human_next_action": "回看原始简历，优先核实一次真实业务系统排障、问题转交和用户确认闭环。"
+  },
+  "hard_gate_conflicts": [],
+  "evidence": [
+    {"criterion_id":"BSO-EXP-01","criterion_name":"相关应用支持/系统运维/实施/服务台经验","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"简历没有提供可定位的相关任职职责和时段。","confidence":"high"},
+    {"criterion_id":"BSO-INTAKE-01","criterion_name":"业务问题承接与诉求澄清","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"简历没有提供面向业务用户承接问题的具体场景。","confidence":"high"},
+    {"criterion_id":"BSO-TROUBLE-01","criterion_name":"初步排障与操作指导","state":"supported","strength":"E2","excerpt":"根据用户操作步骤和权限报错定位问题，并指导用户完成正确操作。","location":"项目经历/业务系统支持","rationale":"有业务背景和候选人本人排查、指导动作，但缺少结果指标和验证窗口。","confidence":"high"},
+    {"criterion_id":"BSO-TRACK-01","criterion_name":"问题记录、状态同步与闭环跟进","state":"supported","strength":"E2","excerpt":"记录问题现象、影响范围和处理过程，解决后由用户确认关闭。","location":"工作经历/问题跟进","rationale":"能看到记录、同步和关闭动作，具体工具与统计口径待核实。","confidence":"high"},
+    {"criterion_id":"BSO-ESCALATE-01","criterion_name":"缺陷、需求、数据异常与复杂问题转交","state":"supported","strength":"E2","excerpt":"补充复现步骤、报错信息和影响范围后转交研发，并持续跟进处理结果。","location":"工作经历/研发协作","rationale":"有转交所需信息和跟进动作，但缺少复杂问题分类标准和最终结果。","confidence":"high"},
+    {"criterion_id":"BSO-MAINT-01","criterion_name":"账号、权限、基础数据与配置维护","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供账号、权限、基础数据或配置维护的可定位案例。","confidence":"high"},
+    {"criterion_id":"BSO-CONTINUITY-01","criterion_name":"关键业务流程与运行保障","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供关键流程受影响时的定级、临时方案和同步证据。","confidence":"high"},
+    {"criterion_id":"BSO-KB-01","criterion_name":"问题分析、知识库与持续改进","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供从高频问题到知识沉淀或流程改进的完整链路。","confidence":"high"},
+    {"criterion_id":"BSO-IMPROVE-01","criterion_name":"上线验证、反馈分析与体验改进","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供上线验证、反馈分析或体验改进的具体结果。","confidence":"high"},
+    {"criterion_id":"BSO-SERVICE-01","criterion_name":"沟通、服务意识与优先级判断","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"只有服务意识描述，未提供优先级判断和服务结果。","confidence":"high"},
+    {"criterion_id":"BSO-SEC-01","criterion_name":"权限、数据、配置与变更安全","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供权限、数据保护、审批或变更审计的具体动作。","confidence":"high"},
+    {"criterion_id":"BSO-COLLAB-01","criterion_name":"跨团队协作与技术表达","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供把业务描述转为技术问题并推动闭环的完整实例。","confidence":"high"},
+    {"criterion_id":"BSO-ENTERPRISE-01","criterion_name":"企业业务系统经验（加分）","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未明确说明 ERP、CRM、OA、客服或其他企业系统类型。","confidence":"high"},
+    {"criterion_id":"BSO-DATA-01","criterion_name":"SQL、日志检索或数据核查（加分）","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供 SQL、日志检索或数据核查的具体动作。","confidence":"high"},
+    {"criterion_id":"BSO-TICKET-01","criterion_name":"工单、服务台分级或知识库运营（加分）","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供工单分级、服务台运营或知识库运营证据。","confidence":"high"},
+    {"criterion_id":"BSO-TRAINING-01","criterion_name":"用户培训、手册或系统上线支持（加分）","state":"not_evidenced","strength":"E0","excerpt":null,"location":null,"rationale":"未提供培训对象、材料或上线支持的具体事实。","confidence":"high"}
+  ],
+  "uncertainties": [
+    {"code":"U10_RUBRIC_AMBIGUITY","description":"岗位画像和具体硬门槛尚未完成双签。","decision_impact":"学历、年限和加分项不能在当前阶段单独改变候选人处置。","required_human_action":"先完成岗位画像校准，再由人工复核本记录。","requires_second_review":true}
+  ],
+  "interview_probes": [
+    {"criterion_id":"BSO-TROUBLE-01","question":"请说明一次业务系统问题的现象、影响、排查步骤、本人处理和结果验证。","expected_signal":"能区分操作、权限、配置、浏览器/网络和系统缺陷，并给出可核对的恢复验证。"},
+    {"criterion_id":"BSO-ESCALATE-01","question":"请举例说明你如何判断一个事项是缺陷、需求、数据异常或复杂技术问题，并如何向研发转交。","expected_signal":"能提供复现步骤、环境、报错、影响范围、优先级和跟进闭环，而不是只说转给研发。"},
+    {"criterion_id":"BSO-CONTINUITY-01","question":"关键业务流程受影响时，你如何定级、安排临时方案、同步用户并推动恢复？","expected_signal":"能说明影响范围、响应优先级、临时措施、状态同步和用户确认。"}
+  ],
+  "sensitive_attributes_used": false,
+  "human_review": {
+    "level_1_required": true,
+    "level_1_status": "pending",
+    "level_1_reviewer": null,
+    "level_1_decision": null,
+    "level_1_reviewed_at": null,
+    "level_2_required": true,
+    "level_2_status": "pending",
+    "level_2_mode": "independent_reviewer",
+    "level_2_reason_codes": ["U10_RUBRIC_AMBIGUITY"],
+    "blind_review_required": true,
+    "blind_review_confirmed": null,
+    "level_2_reviewer": null,
+    "level_2_decision": null,
+    "level_2_reviewed_at": null,
+    "final_disposition": null,
+    "resolution": null
+  },
+  "automation_actions": []
+}

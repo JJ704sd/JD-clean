@@ -28,7 +28,58 @@ class ResumeCleaningTests(unittest.TestCase):
 
         self.assertFalse(result.used_ocr)
         self.assertEqual(result.page_count, 1)
+        self.assertEqual(result.extraction_engine, "local")
         self.assertIn("Go logistics order service", result.markdown)
+
+    def test_mineru_parser_preserves_provenance_and_redacts_output(self):
+        try:
+            import pymupdf
+        except ImportError:
+            self.skipTest("pymupdf is not installed")
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "complex-layout.pdf"
+            document = pymupdf.open()
+            document.new_page()
+            document.new_page()
+            document.save(source)
+            document.close()
+
+            def fake_mineru(path: Path) -> str:
+                calls.append(path)
+                return (
+                    "# 项目经历\n\n张三负责 Go 物流订单服务开发、测试与上线，"
+                    "电话 13812345678。" * 5
+                )
+
+            result = clean_resume(
+                source,
+                candidate_id="candidate-mineru",
+                candidate_name="张三",
+                document_parser="mineru-flash",
+                mineru_extract=fake_mineru,
+            )
+
+        self.assertEqual(calls, [source.resolve()])
+        self.assertEqual(result.extraction_engine, "mineru-flash")
+        self.assertEqual(result.page_count, 2)
+        self.assertTrue(result.used_ocr)
+        self.assertIn("extraction_engine: mineru-flash", result.markdown)
+        self.assertIn("## MinerU 提取结果", result.markdown)
+        self.assertNotIn("13812345678", result.model_text)
+        self.assertNotIn("张三", result.model_text)
+
+    def test_mineru_parser_rejects_plain_text_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "resume.txt"
+            source.write_text("负责 Go 物流订单服务开发、测试与上线。" * 8, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "PDF 或 DOCX"):
+                clean_resume(
+                    source,
+                    candidate_id="candidate-mineru-text",
+                    document_parser="mineru-flash",
+                    mineru_extract=lambda _: "不应执行",
+                )
 
     def test_image_only_pdf_uses_injected_ocr_fallback_once(self):
         try:

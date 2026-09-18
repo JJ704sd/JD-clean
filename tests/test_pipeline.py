@@ -26,7 +26,7 @@ def current_senior_record() -> dict:
     )
     assert match
     record = json.loads(match.group(1))
-    record["rubric_version"] = "senior-fullstack-2026-09-03-v9"
+    record["rubric_version"] = "senior-fullstack-2026-09-14-v14"
     record["priority_profile"]["target_stack"] = "go_present"
     for item in record["evidence"]:
         if item.get("state") == "supported":
@@ -53,6 +53,26 @@ def documented_record(skill_dir: str) -> dict:
         return json.loads(
             (
                 ROOT / "skills" / skill_dir / "references" / "example-record.json"
+            ).read_text(encoding="utf-8")
+        )
+    if skill_dir == "screen-operations-devops-resumes":
+        return json.loads(
+            (
+                ROOT
+                / "skills"
+                / skill_dir
+                / "references"
+                / "example-record-v6.json"
+            ).read_text(encoding="utf-8")
+        )
+    if skill_dir == "screen-business-system-operations-resumes":
+        return json.loads(
+            (
+                ROOT
+                / "skills"
+                / skill_dir
+                / "references"
+                / "example-record.json"
             ).read_text(encoding="utf-8")
         )
     contract = ROOT / "skills" / skill_dir / "references" / "output-contract.md"
@@ -104,7 +124,7 @@ class ScreeningPipelineTests(unittest.TestCase):
             candidate_id=candidate_id,
             role="senior-fullstack-engineer",
             jd_version="senior-fullstack-2026-08-14-v1",
-            rubric_version="senior-fullstack-2026-09-03-v9",
+            rubric_version="senior-fullstack-2026-09-14-v14",
         )
 
     def test_successful_task_calls_model_once_and_writes_structured_outputs(self):
@@ -145,6 +165,40 @@ class ScreeningPipelineTests(unittest.TestCase):
             self.assertTrue(
                 (root / "outputs" / "candidate-001" / "conclusion.md").is_file()
             )
+
+    def test_raw_response_redacts_adapters_that_expose_api_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "resume.md"
+            source.write_text(
+                "负责 Go 跨境物流订单服务的开发、测试、上线与重构。" * 12,
+                encoding="utf-8",
+            )
+            store = TaskStore(root / "state.sqlite3")
+            task = store.enqueue(self._spec(source))
+            secret = "synthetic-api-key"
+            record = current_senior_record()
+            record["summary"] = f"provider echo: {secret}"
+            client = FakeClient(json.dumps(record, ensure_ascii=False))
+            client.api_key = secret
+            pipeline = ScreeningPipeline(
+                store=store,
+                client=client,
+                output_root=root / "outputs",
+                project_root=ROOT,
+            )
+
+            pipeline.process_next()
+
+            raw = (
+                root
+                / "outputs"
+                / "candidate-001"
+                / "raw-response.json"
+            ).read_text(encoding="utf-8")
+            self.assertNotIn(secret, raw)
+            self.assertIn("[已脱敏密钥]", raw)
+            self.assertEqual(store.get(task.task_id).status, "manual_review")
 
     def test_senior_evidence_only_payload_is_assembled_by_python(self):
         with tempfile.TemporaryDirectory() as tmp:

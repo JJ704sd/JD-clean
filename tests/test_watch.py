@@ -50,7 +50,7 @@ def _v8_payload() -> dict:
                 "criterion_id": criterion,
                 "state": "supported",
                 "excerpt": excerpt,
-                "location": "项目经历",
+                "location": "教育经历" if is_admin else "项目经历",
                 "rationale": "有可定位的项目背景、个人动作与结果",
                 "confidence": "high",
                 "evidence_factors": {
@@ -60,6 +60,18 @@ def _v8_payload() -> dict:
                     "result_scope": "上线后按周期统计",
                     "verifiable_impact": "监控结果可核验",
                 },
+                **(
+                    {
+                        "first_education": {
+                            "level": "bachelor_or_above",
+                            "excerpt": "2012–2016 本科",
+                            "location": "教育经历",
+                            "confidence": "high",
+                        }
+                    }
+                    if is_admin
+                    else {}
+                ),
             }
         )
     return {"evidence": evidence, "uncertainties": [], "interview_probes": []}
@@ -104,6 +116,8 @@ class WatchCliTests(unittest.TestCase):
                     [
                         "--database",
                         str(root / "state.sqlite3"),
+                        "--output",
+                        str(root / "outputs"),
                         "worker",
                         "--watch",
                         "--input",
@@ -167,6 +181,8 @@ class WatchCliTests(unittest.TestCase):
                     [
                         "--database",
                         str(root / "state.sqlite3"),
+                        "--output",
+                        str(root / "outputs"),
                         "worker",
                         "--watch",
                         "--input",
@@ -231,7 +247,7 @@ class WatchCliTests(unittest.TestCase):
             self.assertEqual(scanner.scan(), [])
             self.assertEqual(len(scanner.scan()), 1)
 
-    def test_old_contract_is_marked_stale_without_blocking_v9(self):
+    def test_v13_contract_is_marked_stale_without_blocking_v14(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "resume.md"
@@ -243,10 +259,7 @@ class WatchCliTests(unittest.TestCase):
                     candidate_id="old",
                     role="senior-fullstack-engineer",
                     jd_version="senior-fullstack-2026-08-14-v1",
-                    rubric_version="senior-fullstack-2026-09-01-v6",
-                    parser_version="resume-cleaner-2026-09-01-v1",
-                    scoring_version="evidence-score-2026-09-01-v1",
-                    prompt_version="resume-screening-prompt-2026-09-01-v1",
+                    rubric_version="senior-fullstack-2026-09-11-v13",
                 )
             )
             current = store.enqueue(
@@ -255,16 +268,16 @@ class WatchCliTests(unittest.TestCase):
                     candidate_id="current",
                     role="senior-fullstack-engineer",
                     jd_version="senior-fullstack-2026-08-14-v1",
-                    rubric_version="senior-fullstack-2026-09-03-v9",
+                    rubric_version="senior-fullstack-2026-09-14-v14",
                 )
             )
 
             claimed = store.claim_next()
 
             self.assertEqual(claimed.task_id, current.task_id)
-            self.assertEqual(store.get(old.task_id).status, "queued")
             store.mark_stale_contracts(ACTIVE_CONTRACTS)
             self.assertEqual(store.get(old.task_id).error_code, "STALE_CONTRACT_VERSION")
+            self.assertEqual(store.get(current.task_id).rubric_version, "senior-fullstack-2026-09-14-v14")
 
     def test_health_reports_stale_heartbeat_and_single_worker_lease(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,7 +349,7 @@ class WatchCliTests(unittest.TestCase):
             )
             store.release_worker(second)
 
-    def test_v9_watch_runs_clean_assemble_score_validate_and_persist(self):
+    def test_v14_watch_runs_clean_assemble_score_validate_and_persist(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             incoming = root / "Downloads"
@@ -391,7 +404,7 @@ class WatchCliTests(unittest.TestCase):
             )
             self.assertEqual(
                 result["screening_record"]["rubric_version"],
-                "senior-fullstack-2026-09-03-v9",
+                "senior-fullstack-2026-09-14-v14",
             )
             self.assertIn("scorecard", result)
 
@@ -420,7 +433,16 @@ class WatchCliTests(unittest.TestCase):
                 patch.dict(os.environ, {}, clear=True),
                 patch("sys.stderr", io.StringIO()) as stderr,
             ):
-                code = main(["--database", str(database), "worker", "--once"])
+                code = main(
+                    [
+                        "--database",
+                        str(database),
+                        "--output",
+                        str(root / "outputs"),
+                        "worker",
+                        "--once",
+                    ]
+                )
             with redirect_stdout(output):
                 main(["--database", str(database), "health"])
 

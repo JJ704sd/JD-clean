@@ -12,15 +12,15 @@ from typing import Any
 
 ROLE_LABEL = "高级全栈工程师"
 CRITERION_LABELS = {
-    "SEN-EXP-01": "经验与全栈职责",
-    "SEN-BE-01": "后端工程能力",
+    "SEN-EXP-01": "3–7 年经验",
+    "SEN-BE-01": "后端与语言选择",
     "SEN-ARCH-01": "BFF/微服务",
     "SEN-FE-01": "前端独立交付",
     "SEN-DATA-01": "数据与中间件",
-    "SEN-AI-01": "AI 工程化",
+    "SEN-AI-01": "AI 深度使用/产品经验",
     "SEN-DOMAIN-01": "物流领域",
-    "SEN-LEVEL-01": "重构/高级工程深度",
-    "SEN-ADM-01": "行政条件",
+    "SEN-LEVEL-01": "独立/核心项目",
+    "SEN-ADM-01": "学历",
 }
 EVIDENCE_PRIORITY = {
     criterion: index
@@ -61,6 +61,8 @@ STACK_PRIORITY_LABELS = {
     "nodejs_only": "仅 Node.js（优先级较低）",
     "no_qualifying_go_or_nodejs": "不符合 Go/Node.js 主栈门槛",
     "no_qualifying_go": "不符合 Go 硬门槛",
+    "language_transfer_supported": "转语言/转栈学习交付成立",
+    "language_learning_not_evidenced": "语言转换与学习证据不足",
     "unclear": "Go 门槛待确认",
 }
 
@@ -96,6 +98,53 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
     if not isinstance(profile, dict):
         return "旧版记录未分类", "旧版记录未分类"
     stack = STACK_PRIORITY_LABELS.get(profile.get("target_stack"), "主栈分类无效")
+    dimensions = profile.get("qualification_dimensions")
+    if isinstance(dimensions, dict):
+        names = {
+            "experience_range": "3–7 年经验",
+            "education": "学历",
+            "first_education": "第一学历",
+            "logistics": "物流",
+            "valuable_project": "高含金量项目",
+        }
+        if record.get("rubric_version") == "senior-fullstack-2026-09-14-v14":
+            names["education"] = "最高学历"
+        if "language_learning" in dimensions:
+            names["language_learning"] = "语言/学习"
+        states = {"met": "满足", "not_met": "不符合", "unclear": "待确认"}
+        summary = "；".join(
+            f"{names[key]}{states.get(dimensions.get(key), '无效')}"
+            for key in names
+            if key in dimensions
+        )
+        if record.get("rubric_version") in {
+            "senior-fullstack-2026-09-11-v12",
+            "senior-fullstack-2026-09-11-v13",
+            "senior-fullstack-2026-09-14-v14",
+        }:
+            stack = "；".join(
+                (
+                    "语言抵触" if profile.get("language_acceptance") == "resistant" else "未发现语言抵触",
+                    "外包经历" if profile.get("employment_model") == "outsourcing_evidenced" else "未发现外包经历",
+                )
+            )
+            extras = []
+            experience_fit = profile.get("experience_fit_signal")
+            if experience_fit == "preferred_3_to_7_years":
+                extras.append("经验 3–7 年（20%）")
+            elif experience_fit == "outside_preferred_range":
+                extras.append("经验范围外（降分）")
+            elif experience_fit in {"not_evidenced", "unclear"}:
+                extras.append("经验待核（降分）")
+            if profile.get("project_ownership_signal") == "core_or_independent":
+                extras.append("独立/核心项目")
+            if profile.get("ai_bonus_signal") == "supported":
+                extras.append("AI 加分")
+            if profile.get("logistics_experience") == "supported":
+                extras.append("物流加分")
+            if extras:
+                summary += "；" + "、".join(extras)
+        return stack, f"{summary}；不符合 {profile.get('unmet_requirement_count', '?')} 项"
     signals: list[str] = []
     if profile.get("refactoring_experience") == "supported":
         signals.append("重构经验")
@@ -108,6 +157,22 @@ def _priority_labels(record: dict[str, Any]) -> tuple[str, str]:
     if not signals:
         signals.append("未提供重构或物流行业项目证据")
     return stack, "、".join(signals)
+
+
+def _column_labels(record: dict[str, Any]) -> tuple[str, str]:
+    rubric_version = record.get("rubric_version")
+    if rubric_version in {
+        "senior-fullstack-2026-09-11-v13",
+        "senior-fullstack-2026-09-14-v14",
+    }:
+        return "排除信号", "硬门槛与评分"
+    if rubric_version == "senior-fullstack-2026-09-11-v12":
+        return "排除信号", "硬门槛与加分"
+    if rubric_version == "senior-fullstack-2026-09-04-v11":
+        return "语言参考", "三项筛选"
+    if rubric_version == "senior-fullstack-2026-09-04-v10":
+        return "语言路径", "四项筛选"
+    return "语言路径", "优先信号"
 
 
 def _top_evidence(record: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
@@ -163,6 +228,7 @@ def render_single(
     name = _candidate_name(record)
     candidate_id = _clean(record["candidate_id"])
     stack_priority, priority_signals = _priority_labels(record)
+    language_label, screening_label = _column_labels(record)
     lines = [
         f"### 初筛结论｜{name}（{candidate_id}）",
         "",
@@ -171,8 +237,8 @@ def render_single(
         f"| 候选人 | {name}（{candidate_id}） |",
         f"| 岗位 | {ROLE_LABEL} |",
         f"| 规则版本 | {_clean(record['rubric_version'])} |",
-        f"| 主栈优先级 | {stack_priority} |",
-        f"| 优先信号 | {priority_signals} |",
+        f"| {language_label} | {stack_priority} |",
+        f"| {screening_label} | {priority_signals} |",
         f"| 初筛建议（非最终） | {RECOMMENDATION_LABELS[record['model_recommendation']]} |",
         f"| 核心判断 | {_clip(record['recommendation_rationale'], 160)} |",
         f"| 人工复核 | {_review_line(record)} |",
@@ -218,7 +284,7 @@ def render_single(
                 "",
                 "## 结论汇总表",
                 "",
-                "| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | 主栈优先级 | 优先信号 | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
+                f"| 候选人姓名 | 候选人 ID | 岗位 | 模型建议 | {language_label} | {screening_label} | 核心判断 | 关键缺口/待确认 | 人工下一步 |",
                 "|---|---|---|---|---|---|---|---|---|",
                 "| "
                 + " | ".join(
@@ -259,6 +325,7 @@ def render_batch(
         for key in RECOMMENDATION_LABELS
     }
     first = records[0]
+    language_label, screening_label = _column_labels(first)
     lines = [
         "## 批量初筛概览",
         "",
@@ -266,7 +333,7 @@ def render_batch(
         f"- 规则版本：{_clean(first['rubric_version'])}",
         f"- 共 {len(records)} 份：建议推进 {counts['advance_pending_human']}，二审 {counts['second_review']}，暂不推进 {counts['do_not_advance_pending_human']}",
         "",
-        "| 候选人姓名 | 候选人 ID | 初筛建议 | 主栈优先级 | 优先信号 | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
+        f"| 候选人姓名 | 候选人 ID | 初筛建议 | {language_label} | {screening_label} | 核心判断 | 最强证据 | 关键缺口/待确认 | 二审 | 人工下一步 |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for record in records:

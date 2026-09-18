@@ -1,0 +1,374 @@
+{
+  "schema_version": "1.3",
+  "role": "operations-devops-engineer",
+  "jd_version": "operations-devops-engineer-2026-09-17-draft-v1",
+  "role_variant": "crossborder-logistics-ai-operations",
+  "jd_hard_gates_approved": false,
+  "approved_by": [],
+  "criteria": [
+    {
+      "criterion_id": "OPS-EDU-01",
+      "requirement_text": "第一学历须本科及以上；计算机相关专业作为岗位相关性信息",
+      "job_relevance": "招聘方提出的学历要求；第一学历口径和是否作为硬门槛仍待批准",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "简历明确列出的第一学历层次与专业"
+      ],
+      "insufficient_evidence": [
+        "由学校声望、毕业年份或后续学历反推第一学历"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-EXP-01",
+      "requirement_text": "5 年及以上相关运维、DevOps、SRE 或平台工程经验；当前草稿下仅作校准要求，不构成自动淘汰",
+      "job_relevance": "最新 JD 的经验期望；需按相关职责与不重叠任职时段核算",
+      "category": "preferred",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "清晰任职日期与可归属的相关工作职责"
+      ],
+      "insufficient_evidence": [
+        "未注明口径的年限自评或重叠时段重复累计"
+      ],
+      "missing_information_action": "no_effect",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-LINUX-01",
+      "requirement_text": "能独立定位 Linux 与网络中的 CPU、内存、磁盘、连接数等线上问题",
+      "job_relevance": "直接关系到线上故障诊断和恢复",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "生产问题、诊断步骤、本人操作及处置结果"
+      ],
+      "insufficient_evidence": [
+        "只列 Linux、TCP/IP 或监控命令"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-ENV-01",
+      "requirement_text": "负责环境与资源生命周期，并具备阿里云或同类云平台运维经验",
+      "job_relevance": "直接关系到环境交付、扩缩容和云资源运行",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "本人执行资源开通、扩缩容、回收、网络或环境一致性工作的项目证据"
+      ],
+      "insufficient_evidence": [
+        "只列云产品名称或云证书"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-DB-01",
+      "requirement_text": "具备 PostgreSQL、Redis、消息队列的部署、备份恢复、迁移或故障处理经验",
+      "job_relevance": "直接关系到基础服务可用性、数据恢复和云化迁移",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "服务、规模或故障上下文、本人变更/恢复动作及验证结果"
+      ],
+      "insufficient_evidence": [
+        "只列数据库、缓存或队列名称"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-DELIVERY-01",
+      "requirement_text": "熟悉 Docker、Docker Compose 和 CI/CD 构建、测试、部署、回滚与变更留档",
+      "job_relevance": "直接关系到多业务并行交付和安全发布",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "镜像/编排或流水线设计、本人发布操作、验证/回滚机制"
+      ],
+      "insufficient_evidence": [
+        "只写会 Docker 或使用过某 CI 产品"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-OBS-01",
+      "requirement_text": "建设监控、日志、告警、巡检、SLO 口径及故障复盘闭环",
+      "job_relevance": "直接关系到线上稳定性与响应效率",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "监控/日志指标、告警处置、响应分级、复盘行动及闭环结果"
+      ],
+      "insufficient_evidence": [
+        "只列 Prometheus、Grafana、Loki 等工具"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-SEC-DR-01",
+      "requirement_text": "实施主机安全基线、凭据与最小权限、生产审计、备份策略和恢复演练",
+      "job_relevance": "直接关系到生产安全、合规和灾备可恢复性",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "本人落实的加固/权限/轮换/审计或恢复演练及验证"
+      ],
+      "insufficient_evidence": [
+        "只写安全意识、等保或备份工具名"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-MODEL-01",
+      "requirement_text": "运维模型 API 与网关，包括配额、限流、供应商切换和密钥轮换",
+      "job_relevance": "直接关系到模型调用稳定性、安全和供应连续性",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "线上调用链、本人治理动作、失败处置/降级及结果"
+      ],
+      "insufficient_evidence": [
+        "只调用过聊天 API 或列出模型厂商"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-RAG-01",
+      "requirement_text": "理解向量检索、RAG 与 Agent 运行链路，并能排查线上调用或检索质量问题",
+      "job_relevance": "直接关系到 AI 产品端到端运行和业务回归",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "检索/Agent 链路、故障或 Bad Case、本人定位动作和回归验证"
+      ],
+      "insufficient_evidence": [
+        "只列 RAG、向量库或 Agent 关键词"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-AI-GOV-01",
+      "requirement_text": "记录 Token 成本，并对模型/Prompt 版本执行灰度、对比、效果验证与回滚",
+      "job_relevance": "直接关系到 AI 效果与调用成本的线上治理",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "成本口径、版本控制、灰度对照、回归指标及回滚动作"
+      ],
+      "insufficient_evidence": [
+        "只写关注 Token 成本或调过 Prompt"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-AUTO-COST-01",
+      "requirement_text": "使用 Shell 与 Python 或 Go 自动化重复工作，并维护 IaC、配置或资源成本台账",
+      "job_relevance": "直接关系到自助化、资源效率和平台化",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "自动化输入/输出、本人脚本或 IaC 责任、使用范围及可核验节省/可靠性结果"
+      ],
+      "insufficient_evidence": [
+        "只列脚本语言或 IaC 工具名"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-COLLAB-01",
+      "requirement_text": "与开发、测试、算法和产品协作，能维护规范文档与复盘",
+      "job_relevance": "直接关系到跨团队发布、故障闭环和知识沉淀",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "具体协作目标、候选人承担的接口责任、文档/决策/复盘产物"
+      ],
+      "insufficient_evidence": [
+        "只写沟通能力强或跨部门协作"
+      ],
+      "missing_information_action": "interview_verify",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-OWN-01",
+      "requirement_text": "有独立承担项目或担任项目核心开发者/核心实施者的经历优先",
+      "job_relevance": "用于识别项目责任深度与端到端交付贡献，不以职称或团队规模替代证据",
+      "category": "preferred",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "项目目标、候选人承担的核心模块或决策、交付结果和责任边界"
+      ],
+      "insufficient_evidence": [
+        "只写项目负责人/核心成员头衔，没有具体职责或结果"
+      ],
+      "missing_information_action": "interview_verify",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-AI-BONUS-01",
+      "requirement_text": "深度使用 AI 工具或有 AI 产品经验者优先",
+      "job_relevance": "岗位聚焦 AI 产品全链路运维；加分依据须为可描述的实际使用或产品交付",
+      "category": "preferred",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "持续使用 AI 工具解决工作问题的具体流程/效果，或参与 AI 产品设计、开发、上线与迭代的个人职责"
+      ],
+      "insufficient_evidence": [
+        "只列 AI 工具或模型名称、参加培训或自称 AI 深度用户"
+      ],
+      "missing_information_action": "interview_verify",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-OUTSOURCE-01",
+      "requirement_text": "明确属于外包、派遣或驻场外包用工形式时不符合用工要求",
+      "job_relevance": "招聘方提出不接受外包；规则须限定为可核实的候选人用工关系，不以客户现场、项目供应商或工作地点推断",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "简历明确说明候选人本人属于外包、派遣或驻场外包用工形式"
+      ],
+      "insufficient_evidence": [
+        "只提到客户现场、甲方项目、供应商合作或工作地点"
+      ],
+      "missing_information_action": "no_effect",
+      "conflict_action": "second_review",
+      "proxy_risk": "review_required",
+      "owner": "recruiter",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-SCALE-01",
+      "requirement_text": "参与过运维复杂度高、业务量大或用户规模大的项目者优先",
+      "job_relevance": "真实系统的负载、依赖和用户规模会影响运行保障与容量治理；需结合候选人本人运维参与情况判断",
+      "category": "preferred",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "线上项目复杂度，如关键依赖、跨系统/跨区域集成或可用性要求，并说明由此产生的容量、可用性、告警或发布保障约束",
+        "有统计周期、分母和峰值口径的业务量、用户量、订单/交易量、请求量或流量，并说明候选人本人参与的容量压测、峰值告警、SLO/p95、限流或发布保护"
+      ],
+      "insufficient_evidence": [
+        "没有口径的“高并发”“海量用户”或“核心系统”自述",
+        "只有公司品牌、团队规模或规模数字，没有候选人本人的运维参与证据",
+        "只写本人参与运维，没有系统复杂度、业务量或用户规模事实"
+      ],
+      "missing_information_action": "interview_verify",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-OFFICE-IT-01",
+      "requirement_text": "负责公司电脑与办公 IT 设备的资产台账、发放配置回收、Windows/macOS 与办公软件安装升级、故障排查、备份恢复、重装及入离职交接",
+      "job_relevance": "直接关系到办公设备可用性、数据保护和员工入离职交接效率",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "设备资产、系统/软件配置、故障排查、数据备份恢复或入离职交接中的个人动作和结果"
+      ],
+      "insufficient_evidence": [
+        "只写 IT 支持、办公软件名称或无个人动作的设备管理"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-OFFICE-NET-01",
+      "requirement_text": "负责办公有线/无线网络及 VPN 的搭建配置维护、远程接入账号权限和连接/访问/性能问题排查",
+      "job_relevance": "直接关系到办公网络稳定性、远程接入安全和日常办公效率",
+      "category": "requires_calibration",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "网络或 VPN 拓扑/配置、账号权限、故障定位、性能处理和安全验证中的个人动作"
+      ],
+      "insufficient_evidence": [
+        "只列网络、VPN 或厂商名，没有拓扑、权限、排障或验证事实"
+      ],
+      "missing_information_action": "second_review",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    },
+    {
+      "criterion_id": "OPS-DOMAIN-01",
+      "requirement_text": "有物流、供应链或跨境行业背景者优先；需有明确业务事实并能与本人系统/平台工作关联",
+      "job_relevance": "有助于理解跨境物流 AI 产品的业务约束，但不是岗位硬门槛",
+      "category": "preferred",
+      "resume_observable": true,
+      "accepted_evidence": [
+        "明确的物流、供应链或跨境业务项目，以及候选人在系统/平台运维中的关联职责"
+      ],
+      "insufficient_evidence": [
+        "公司名称、客户名称或没有明确行业事实的服务描述"
+      ],
+      "missing_information_action": "no_effect",
+      "conflict_action": "second_review",
+      "proxy_risk": "none",
+      "owner": "hiring_manager",
+      "approved": false
+    }
+  ],
+  "rubric_version": "operations-devops-rubric-2026-09-17-v1"
+}
