@@ -17,3 +17,4 @@ release/
 logs/
 tmp/
 output docs/
+feishu-auth-*.png

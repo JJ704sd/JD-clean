@@ -158,8 +158,21 @@ try {
     }
 
     $ReviewCsv = Join-Path $ExportDirectory 'review_queue.csv'
-    $ReviewMarkdown = Join-Path $ExportDirectory 'review.md'
-    $ReviewRows = if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) { @(Import-Csv -LiteralPath $ReviewCsv) } else { @() }
+    $NoScoreCsv = Join-Path $ExportDirectory 'review_queue_no_scores.csv'
+    $ReviewMarkdown = Join-Path $ExportDirectory 'review-list-no-scores.md'
+    $LegacyReviewMarkdown = Join-Path $ExportDirectory 'review.md'
+    $ReviewRows = @()
+    if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) {
+        $ReviewRows = @(Import-Csv -LiteralPath $ReviewCsv)
+        $ReviewRows |
+            Select-Object task_id, candidate_id, candidate_name, role, recommendation, required_review, error_code |
+            Export-Csv -LiteralPath $NoScoreCsv -NoTypeInformation -Encoding utf8
+    }
+    else {
+        @() |
+            Select-Object task_id, candidate_id, candidate_name, role, recommendation, required_review, error_code |
+            Export-Csv -LiteralPath $NoScoreCsv -NoTypeInformation -Encoding utf8
+    }
     $MarkdownLines = @(
         '# Business-system operations resume review queue',
         '',
@@ -174,7 +187,9 @@ try {
         $ErrorText = if ([string]::IsNullOrWhiteSpace($Row.error_code)) { '' } else { "; process_marker=$($Row.error_code)" }
         $MarkdownLines += "- ${Name}: qualitative_result=$Recommendation; review=$RequiredReview$ErrorText"
     }
-    [System.IO.File]::WriteAllText($ReviewMarkdown, (($MarkdownLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+    $ReviewMarkdownText = (($MarkdownLines -join "`r`n") + "`r`n")
+    [System.IO.File]::WriteAllText($ReviewMarkdown, $ReviewMarkdownText, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($LegacyReviewMarkdown, $ReviewMarkdownText, [System.Text.UTF8Encoding]::new($false))
 
     Write-Output "run_date=$RunDateTag"
     Write-Output "candidate_pdf_count=$($CandidatePdfs.Count)"
@@ -182,6 +197,7 @@ try {
     Write-Output "database=$Database"
     Write-Output "output=$OutputDirectory"
     Write-Output "export=$ExportDirectory"
+    Write-Output "review_csv=$NoScoreCsv"
     Write-Output "review_markdown=$ReviewMarkdown"
     Write-Output "worker_code=$WorkerCode"
     Write-Output "export_code=$ExportCode"

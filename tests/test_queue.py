@@ -33,6 +33,34 @@ class TaskQueueTests(unittest.TestCase):
             self.assertEqual(interrupted.error_code, "WORKER_INTERRUPTED_AMBIGUOUS")
             self.assertEqual(store.retry_failed(queued.task_id), 0)
 
+    def test_manual_review_retry_requires_invalid_model_output_and_explicit_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "resume.md"
+            source.write_text("业务系统支持与用户培训" * 30, encoding="utf-8")
+            store = TaskStore(root / "screening.sqlite3")
+            task = store.enqueue(
+                TaskSpec(
+                    source_path=source,
+                    candidate_id="candidate-001",
+                    role="business-system-operations-engineer",
+                    jd_version="business-system-operations-engineer-2026-09-18-draft-v1",
+                    rubric_version="business-system-operations-rubric-2026-09-18-v1",
+                )
+            )
+            store.mark_manual_review(
+                task.task_id,
+                code="INVALID_MODEL_OUTPUT",
+                message="invalid evidence state",
+                model_completed=True,
+            )
+
+            self.assertEqual(store.status_counts(), {"manual_review": 1})
+            self.assertEqual(store.retry_manual_review(task.task_id), 1)
+            self.assertEqual(store.get(task.task_id).status, "queued")
+            self.assertEqual(store.get(task.task_id).model_completed, False)
+            self.assertEqual(store.retry_manual_review(task.task_id), 0)
+
     def test_same_resume_and_contract_is_enqueued_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

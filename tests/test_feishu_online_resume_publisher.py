@@ -27,6 +27,7 @@ class OnlineResumePublisherTests(unittest.TestCase):
             report_path=root / "report.json",
             history_path=root / "history.jsonl",
             index_path=root / "resume-index.md",
+            folder_token="folder-test",
             dry_run=dry_run,
         )
 
@@ -68,6 +69,23 @@ class OnlineResumePublisherTests(unittest.TestCase):
             self.assertEqual(report["base_writebacks"], 0)
             self.assertEqual(report["model_calls"], 0)
             self.assertNotIn("https://", (root / "resume-index.md").read_text(encoding="utf-8"))
+
+    def test_apply_without_shared_folder_token_stops_before_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._source(root)
+            config = replace(
+                self._config(root, dry_run=False),
+                folder_token=None,
+            )
+            importer = Mock()
+            report = run_cycle(config, importer=importer)
+
+            self.assertEqual(report["cycle_status"], "manual_review")
+            self.assertEqual(report["summary"], {"shared_folder_token_required": 1})
+            self.assertIn("FEISHU_DOC_FOLDER_TOKEN_REQUIRED", report["error"])
+            importer.import_and_readback.assert_not_called()
+            self.assertFalse(report["external_writes"])
 
     def test_apply_imports_once_and_writes_online_link_index(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
