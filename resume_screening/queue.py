@@ -696,6 +696,50 @@ class TaskStore:
             )
         return cursor.rowcount
 
+    def retry_manual_review(self, task_id: int | None = None) -> int:
+        """Explicitly requeue only invalid-model-output manual reviews.
+
+        Manual review is intentionally not part of the normal retry path. This
+        narrow, user-authorized path keeps contract, parsing, and process
+        failures out of automatic retries while allowing an explicit retry of
+        a provider response that failed structural validation.
+        """
+
+        parameters: list[Any] = [_utc_now()]
+        task_filter = ""
+        if task_id is not None:
+            task_filter = " AND task_id = ?"
+            parameters.append(task_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT task_id FROM tasks
+                WHERE status = 'manual_review'
+                    AND error_code = 'INVALID_MODEL_OUTPUT'
+                    {task_filter}
+                """,
+                parameters[1:],
+            ).fetchall()
+            if not rows:
+                return 0
+            now = parameters[0]
+            cursor = connection.execute(
+                f"""
+                UPDATE tasks SET status = 'queued', model_completed = 0,
+                    api_response_id = NULL, usage_json = NULL, result_json = NULL,
+                    error_code = NULL, error_message = NULL, updated_at = ?
+                WHERE status = 'manual_review'
+                    AND error_code = 'INVALID_MODEL_OUTPUT'
+                    {task_filter}
+                """,
+                parameters,
+            )
+            for row in rows:
+                self._insert_event(
+                    connection, row["task_id"], "error", "MANUAL_RETRY_REQUESTED"
+                )
+        return cursor.rowcount
+
     def successful_results(self) -> list[tuple[TaskRecord, dict[str, Any]]]:
         with self._connection() as connection:
             rows = connection.execute(

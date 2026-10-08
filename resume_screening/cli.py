@@ -174,6 +174,12 @@ def _parser() -> argparse.ArgumentParser:
     retry = subparsers.add_parser("retry-failed", help="显式重置未完成的可重试任务")
     retry.add_argument("--task-id", type=int)
 
+    retry_manual = subparsers.add_parser(
+        "retry-manual-review",
+        help="在用户明确要求后，仅重试 INVALID_MODEL_OUTPUT 的 manual_review 任务",
+    )
+    retry_manual.add_argument("--task-id", type=int)
+
     export = subparsers.add_parser("export", help="导出成功结果")
     export.add_argument("--directory", help="required batch-specific export directory")
 
@@ -668,6 +674,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "retry-failed":
             count = store.retry_failed(args.task_id)
             print(f"重新入队 {count} 个未完成任务")
+            return 0
+        if args.command == "retry-manual-review":
+            count = store.retry_manual_review(args.task_id)
+            print(f"按用户明确要求重新入队 {count} 个模型输出复核任务")
             return 0
         if args.command == "export":
             return _export(args, store)

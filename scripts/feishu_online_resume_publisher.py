@@ -691,6 +691,23 @@ def run_cycle(config: PublisherConfig, importer: OnlineFeishuImporter | None = N
     report = _report_shell(config, started_at=started_at)
     fingerprint = _config_fingerprint(config)
 
+    if not config.dry_run and not config.folder_token:
+        report["cycle_status"] = "manual_review"
+        report["preflight"] = {
+            "ok": False,
+            "external_system": "not consulted",
+            "reason": "shared_folder_token_required",
+        }
+        report["summary"] = {"shared_folder_token_required": 1}
+        report["error"] = (
+            "FEISHU_DOC_FOLDER_TOKEN_REQUIRED: --apply requires an explicitly "
+            "confirmed shared folder token; Drive root import is disabled."
+        )
+        report["finished_at"] = now_utc()
+        _write_json(config.state_path, state)
+        _save_report_and_history(config, report)
+        return report
+
     if not config.dry_run and state.get("last_dry_run_fingerprint") != fingerprint:
         report["cycle_status"] = "dry_run_gate_required"
         report["summary"] = {"dry_run_gate_required": 1}

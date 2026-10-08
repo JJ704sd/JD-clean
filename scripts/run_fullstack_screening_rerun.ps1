@@ -159,6 +159,87 @@ try {
         throw "Resume export failed with exit code $ExportCode."
     }
 
+    # Keep the external export qualitative; internal screening JSON and the
+    # database retain deterministic scores for audit, but public-facing files
+    # must not expose score, grade, scorecard, or computed_score fields.
+    function Remove-ExternalScoreFields {
+        param([object]$Value)
+
+        if ($null -eq $Value) {
+            return $null
+        }
+        if ($Value -is [System.Collections.IDictionary]) {
+            $Result = [ordered]@{}
+            foreach ($Key in $Value.Keys) {
+                if ($Key -in @('score', 'grade', 'scorecard', 'computed_score')) {
+                    continue
+                }
+                $Result[$Key] = Remove-ExternalScoreFields $Value[$Key]
+            }
+            return [pscustomobject]$Result
+        }
+        if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+            return @($Value | ForEach-Object { Remove-ExternalScoreFields $_ })
+        }
+        if ($Value.GetType().FullName -eq 'System.Management.Automation.PSCustomObject') {
+            $Result = [ordered]@{}
+            foreach ($Property in $Value.PSObject.Properties) {
+                if ($Property.Name -in @('score', 'grade', 'scorecard', 'computed_score')) {
+                    continue
+                }
+                $Result[$Property.Name] = Remove-ExternalScoreFields $Property.Value
+            }
+            return [pscustomobject]$Result
+        }
+        return $Value
+    }
+
+    $SummaryJson = Join-Path $ExportDirectory 'summary.json'
+    if (Test-Path -LiteralPath $SummaryJson -PathType Leaf) {
+        $SummaryValue = Get-Content -LiteralPath $SummaryJson -Raw -Encoding utf8 | ConvertFrom-Json
+        $SanitizedSummary = @($SummaryValue | ForEach-Object { Remove-ExternalScoreFields $_ })
+        [System.IO.File]::WriteAllText(
+            $SummaryJson,
+            (($SanitizedSummary | ConvertTo-Json -Depth 100) + "`r`n"),
+            [System.Text.UTF8Encoding]::new($false)
+        )
+    }
+
+    # Windows PowerShell 5.1 does not accept the `utf8BOM` encoding value and
+    # defaults Import-Csv to the ANSI code page, which mojibakes UTF-8 CSVs.
+    # `UTF8` is BOM-writing on 5.1, which matches how resume_screening writes
+    # these files (encoding="utf-8-sig"), so the round-trip stays byte-consistent.
+    $SummaryCsv = Join-Path $ExportDirectory 'summary.csv'
+    if (Test-Path -LiteralPath $SummaryCsv -PathType Leaf) {
+        $SummaryRows = @(Import-Csv -LiteralPath $SummaryCsv -Encoding UTF8 | ForEach-Object {
+            [pscustomobject]@{
+                task_id = $_.task_id
+                candidate_id = $_.candidate_id
+                candidate_name = $_.candidate_name
+                role = $_.role
+                rubric_version = $_.rubric_version
+                recommendation = $_.recommendation
+            }
+        })
+        $SummaryRows | Export-Csv -LiteralPath $SummaryCsv -NoTypeInformation -Encoding UTF8
+    }
+
+    $ReviewCsv = Join-Path $ExportDirectory 'review_queue.csv'
+    if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) {
+        $ReviewRowsForExport = @(Import-Csv -LiteralPath $ReviewCsv -Encoding UTF8 | ForEach-Object {
+            [pscustomobject]@{
+                task_id = $_.task_id
+                candidate_id = $_.candidate_id
+                candidate_name = $_.candidate_name
+                role = $_.role
+                recommendation = $_.recommendation
+                required_review = $_.required_review
+                error_code = $_.error_code
+            }
+        })
+        $ReviewRowsForExport | Export-Csv -LiteralPath $ReviewCsv -NoTypeInformation -Encoding UTF8
+    }
+
     $ScreeningFiles = @(
         Get-ChildItem -LiteralPath $OutputDirectory -Filter 'screening.json' -File -Recurse -ErrorAction SilentlyContinue
     )
@@ -174,7 +255,7 @@ try {
     $ReviewMarkdown = Join-Path $ExportDirectory 'review.md'
     $ReviewRows = @()
     if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) {
-        $ReviewRows = @(Import-Csv -LiteralPath $ReviewCsv)
+        $ReviewRows = @(Import-Csv -LiteralPath $ReviewCsv -Encoding UTF8)
     }
     $MarkdownLines = @(
         '# Senior full-stack resume review queue',
