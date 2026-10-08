@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全栈实习简历 — 编辑稿</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #edf0f3; color: #17212b; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 10pt; line-height: 1.45; }
+.toolbar { position: sticky; top: 0; padding: 12px 20px; background: #fff; border-bottom: 1px solid #ccd4dc; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+button { border: 1px solid #b2bfcc; border-radius: 4px; padding: 7px 12px; background: #fff; color: #17212b; cursor: pointer; font: inherit; }
+button:hover { background: #edf3f8; }
+.toolbar span { color: #4c5b69; font-size: 9pt; }
+.sheet { width: 210mm; min-height: 297mm; margin: 20px auto; padding: 14mm; background: white; box-shadow: 0 3px 18px #ccd4dc; }
+h1 { margin: 0 0 5px; font-size: 22pt; letter-spacing: 1px; }
+h2 { margin: 16px 0 7px; padding-bottom: 4px; border-bottom: 1px solid #bdc9d4; color: #224e76; font-size: 12pt; break-after: avoid; }
+p { margin: 4px 0; }
+.entry { margin-bottom: 10px; break-inside: avoid; }
+.entry-title { display: flex; justify-content: space-between; gap: 15px; align-items: baseline; }
+.date { color: #4c5b69; flex-shrink: 0; font-size: 9pt; }
+.meta { color: #4c5b69; }
+ul { margin: 5px 0; padding-left: 18px; }
+li { margin: 3px 0; }
+a { color: #224e76; text-decoration: none; overflow-wrap: anywhere; }
+article { outline: none; overflow-wrap: anywhere; }
+article:focus { outline: 1px dashed #b2bfcc; outline-offset: 5px; }
+@page { size: A4; margin: 14mm; }
+@media print {
+  body { background: #fff; }
+  .toolbar { display: none !important; }
+  .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+  article:focus { outline: none; }
+  h1, h2, .entry-title { break-after: avoid; }
+  a { color: inherit; }
+}
+@media screen and (max-width: 840px) {
+  .sheet { width: calc(100% - 24px); min-height: 0; margin: 12px; padding: 20px; }
+  .entry-title { flex-wrap: wrap; gap: 2px 12px; }
+}
+</style>
+</head>
+<body>
+<nav class="toolbar" aria-label="本地编辑工具">
+  <button type="button" id="save">保存 HTML</button>
+  <button type="button" id="print">打印 / PDF</button>
+  <span>点击正文编辑。保存后保留下载副本；成稿前确认全部事实并删除待填标记。</span>
+</nav>
+<main class="sheet">
+<article id="resume" contenteditable="true" spellcheck="false" aria-label="可编辑简历正文">
+<header>
+  <h1>【姓名待填】</h1>
+  <p><strong>求职意向：全栈开发实习</strong></p>
+  <p class="meta">【本人联系方式】 · 【本人允许公开的作品链接】</p>
+  <p class="meta">【本人确认的每周天数、到岗日期和持续时长】</p>
+</header>
+<section>
+  <h2>教育背景</h2>
+  <div class="entry">
+    <div class="entry-title"><strong>【学校】 · 【专业】 · 【真实学历与在读状态】</strong><span class="date">【起止时间】</span></div>
+    <p>【少量相关课程或有材料支持的奖项；无则删除】</p>
+  </div>
+</section>
+<section>
+  <h2>实习经历</h2>
+  <div class="entry">
+    <div class="entry-title"><strong>【公司与真实岗位；无实际经历则删除本节】</strong><span class="date">【起止时间】</span></div>
+    <p class="meta">【业务背景与个人角色】</p>
+    <ul>
+      <li>【本人负责的模块、动作与具体实现】</li>
+      <li>【本人处理的问题、验证方式与完成结果】</li>
+    </ul>
+  </div>
+</section>
+<section>
+  <h2>项目经历</h2>
+  <div class="entry">
+    <div class="entry-title"><strong>【项目名与课程/个人/团队性质】</strong><span class="date">【起止时间】</span></div>
+    <p class="meta">【用途、个人角色与实际技术栈】</p>
+    <ul>
+      <li>【问题或需求 → 本人接口/页面/数据实现 → 已完成结果】</li>
+      <li>【调试、取舍、测试或部署的真实过程】</li>
+      <li>【有口径的验证结果；没有可靠数字时写具体定性结果】</li>
+    </ul>
+  </div>
+</section>
+<section>
+  <h2>技术能力</h2>
+  <p><strong>后端与接口：</strong>【实际使用或能解释的语言、框架与 HTTP 基础】</p>
+  <p><strong>前端：</strong>【实际页面、组件与联调经验】</p>
+  <p><strong>数据与工程：</strong>【实际 SQL、Git、测试与部署实践】</p>
+  <p><strong>AI：</strong>【实际 API/检索实践或学习行动；无则删除】</p>
+</section>
+</article>
+</main>
+<script>
+(() => {
+  const editor = document.getElementById("resume");
+  editor.addEventListener("paste", event => {
+    event.preventDefault();
+    const text = event.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
+  });
+  document.getElementById("save").addEventListener("click", () => {
+    const clone = document.documentElement.cloneNode(true);
+    const markup = "<!doctype html>\n" + clone.outerHTML;
+    const url = URL.createObjectURL(new Blob([markup], { type: "text/html;charset=utf-8" }));
+    const download = document.createElement("a");
+    download.href = url;
+    download.download = "fullstack-intern-resume.html";
+    download.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
+  document.getElementById("print").addEventListener("click", () => window.print());
+})();
+</script>
+</body>
+</html>

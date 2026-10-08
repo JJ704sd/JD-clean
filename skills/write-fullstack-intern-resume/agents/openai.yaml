@@ -1,0 +1,4 @@
+interface:
+  display_name: "全栈实习简历制作与修改"
+  short_description: "基于真实项目制作、修改全栈实习简历，保留个人贡献与可核验证据"
+  default_prompt: "请使用 $write-fullstack-intern-resume，根据我的现有简历、目标 JD 和项目材料制作或修改全栈开发实习简历。"

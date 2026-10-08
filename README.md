@@ -29,6 +29,14 @@
 
 全栈工程师 v14 将“第一学历本科及以上”作为简历硬门槛；只有简历原文和时间顺序能明确证明第一学历低于本科时，才建议暂不推进并等待人工一审。只写最高学历、第一学历顺序不清、事实冲突或低置信度时进入二审。明确对语言选择或转语言犹豫/抵触，以及明确人力外包、软件外包、外派驻场或驻场开发经历，也建议暂不推进并等待人工一审。3–7 年应用研发经验的评分权重为 20%，范围外或年限不清会降低总分，但不能单独淘汰。独立承担项目或项目核心开发者优先，AI 深度使用和 AI 产品/工程经验加分；物流经验对优先级影响较大，但不是强制条件。所有机器建议均须人工确认，不自动删除简历或写入 ATS 最终状态。
 
+## 全栈实习简历制作与修改
+
+新增 [write-fullstack-intern-resume](skills/write-fullstack-intern-resume/SKILL.md)，用于求职者从零制作、修改项目经历和对齐实习 JD。包含事实账本、内容骨架、虚构改写案例及可编辑 A4 HTML 模板；依据真实项目表述个人实现，不补造履历或指标。参考项目与样本范围见 [来源说明](skills/write-fullstack-intern-resume/references/source-notes.md)。
+
+在当前项目中可以直接请求：`请读取 skills/write-fullstack-intern-resume/SKILL.md，结合我的简历和目标 JD 修改全栈实习简历。` 跨项目复用时，将该完整文件夹放到 Codex 的用户 skills 目录，再在新对话调用 `$write-fullstack-intern-resume`。该 Skill 可独立使用，无需安装 ASu-skills，也不依赖 MiniMax 或飞书；仅在提供并要求读取飞书材料时使用已登录的 lark-cli。
+
+只改文字时交付请求的段落；要求制作文件时复制 [HTML 模板](skills/write-fullstack-intern-resume/assets/resume-template.html)，在浏览器中编辑、保存副本并打印为 PDF。原始简历、事实账本和生成结果保存在私有输出目录，不提交公开仓库。
+
 ## 安装
 
 项目固定使用 Python 3.12 和 `uv`：
