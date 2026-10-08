@@ -205,9 +205,13 @@ try {
         )
     }
 
+    # Windows PowerShell 5.1 does not accept the `utf8BOM` encoding value and
+    # defaults Import-Csv to the ANSI code page, which mojibakes UTF-8 CSVs.
+    # `UTF8` is BOM-writing on 5.1, which matches how resume_screening writes
+    # these files (encoding="utf-8-sig"), so the round-trip stays byte-consistent.
     $SummaryCsv = Join-Path $ExportDirectory 'summary.csv'
     if (Test-Path -LiteralPath $SummaryCsv -PathType Leaf) {
-        $SummaryRows = @(Import-Csv -LiteralPath $SummaryCsv | ForEach-Object {
+        $SummaryRows = @(Import-Csv -LiteralPath $SummaryCsv -Encoding UTF8 | ForEach-Object {
             [pscustomobject]@{
                 task_id = $_.task_id
                 candidate_id = $_.candidate_id
@@ -217,12 +221,12 @@ try {
                 recommendation = $_.recommendation
             }
         })
-        $SummaryRows | Export-Csv -LiteralPath $SummaryCsv -NoTypeInformation -Encoding utf8BOM
+        $SummaryRows | Export-Csv -LiteralPath $SummaryCsv -NoTypeInformation -Encoding UTF8
     }
 
     $ReviewCsv = Join-Path $ExportDirectory 'review_queue.csv'
     if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) {
-        $ReviewRowsForExport = @(Import-Csv -LiteralPath $ReviewCsv | ForEach-Object {
+        $ReviewRowsForExport = @(Import-Csv -LiteralPath $ReviewCsv -Encoding UTF8 | ForEach-Object {
             [pscustomobject]@{
                 task_id = $_.task_id
                 candidate_id = $_.candidate_id
@@ -233,7 +237,7 @@ try {
                 error_code = $_.error_code
             }
         })
-        $ReviewRowsForExport | Export-Csv -LiteralPath $ReviewCsv -NoTypeInformation -Encoding utf8BOM
+        $ReviewRowsForExport | Export-Csv -LiteralPath $ReviewCsv -NoTypeInformation -Encoding UTF8
     }
 
     $ScreeningFiles = @(
@@ -251,7 +255,7 @@ try {
     $ReviewMarkdown = Join-Path $ExportDirectory 'review.md'
     $ReviewRows = @()
     if (Test-Path -LiteralPath $ReviewCsv -PathType Leaf) {
-        $ReviewRows = @(Import-Csv -LiteralPath $ReviewCsv)
+        $ReviewRows = @(Import-Csv -LiteralPath $ReviewCsv -Encoding UTF8)
     }
     $MarkdownLines = @(
         '# Senior full-stack resume review queue',
